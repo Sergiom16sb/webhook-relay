@@ -1,3 +1,3 @@
-module github.com/sgtour/webhook-platform-go
+module github.com/sgtour/webhook-relay
 
 go 1.27.1
