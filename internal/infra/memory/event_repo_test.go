@@ -24,6 +24,13 @@ func validEvent(id string) *domain.Event {
 	}
 }
 
+// deliveredEvent returns a valid event with status=Delivered.
+func deliveredEvent(id string) *domain.Event {
+	e := validEvent(id)
+	e.Status = domain.EventStatusDelivered
+	return e
+}
+
 func mustParseTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
@@ -32,55 +39,61 @@ func mustParseTime(s string) time.Time {
 	return t
 }
 
-func TestEventStore_SaveAndFindByID(t *testing.T) {
-	store := memory.NewEventStore()
-	ctx := context.Background()
-
-	e := validEvent("evt_1")
-	if err := store.Save(ctx, e); err != nil {
-		t.Fatalf("save: %v", err)
+func TestEventStore(t *testing.T) {
+	cases := []struct {
+		name       string
+		seed       []*domain.Event // pre-populate store
+		save       *domain.Event   // event to save; nil = skip save
+		query      string          // id to find after save; "" = skip find
+		wantErr    error           // expected error from find (or from save if save fails)
+		wantStatus domain.EventStatus
+	}{
+		{
+			name:       "save then find returns the event",
+			save:       validEvent("evt_1"),
+			query:      "evt_1",
+			wantStatus: domain.EventStatusPending,
+		},
+		{
+			name:    "find missing returns ErrEventNotFound",
+			query:   "missing",
+			wantErr: application.ErrEventNotFound,
+		},
+		{
+			name:       "save overwrites existing id",
+			seed:       []*domain.Event{validEvent("evt_1")},
+			save:       deliveredEvent("evt_1"),
+			query:      "evt_1",
+			wantStatus: domain.EventStatusDelivered,
+		},
 	}
 
-	got, err := store.FindByID(ctx, "evt_1")
-	if err != nil {
-		t.Fatalf("find: %v", err)
-	}
-	if got.ID != "evt_1" {
-		t.Errorf("got ID=%q, want evt_1", got.ID)
-	}
-	if got.Status != domain.EventStatusPending {
-		t.Errorf("got status=%q, want pending", got.Status)
-	}
-}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			store := memory.NewEventStore()
+			ctx := context.Background()
 
-func TestEventStore_FindByID_NotFound(t *testing.T) {
-	store := memory.NewEventStore()
-	ctx := context.Background()
+			for _, e := range tt.seed {
+				if err := store.Save(ctx, e); err != nil {
+					t.Fatalf("seed save: %v", err)
+				}
+			}
 
-	_, err := store.FindByID(ctx, "missing")
-	if !errors.Is(err, application.ErrEventNotFound) {
-		t.Fatalf("got %v, want ErrEventNotFound", err)
-	}
-}
+			if tt.save != nil {
+				if err := store.Save(ctx, tt.save); err != nil {
+					t.Fatalf("save: %v", err)
+				}
+			}
 
-func TestEventStore_Overwrite(t *testing.T) {
-	store := memory.NewEventStore()
-	ctx := context.Background()
-
-	e1 := validEvent("evt_1")
-	e1.Status = domain.EventStatusPending
-	if err := store.Save(ctx, e1); err != nil {
-		t.Fatal(err)
-	}
-
-	e2 := validEvent("evt_1")
-	e2.Status = domain.EventStatusDelivered
-	if err := store.Save(ctx, e2); err != nil {
-		t.Fatal(err)
-	}
-
-	got, _ := store.FindByID(ctx, "evt_1")
-	if got.Status != domain.EventStatusDelivered {
-		t.Errorf("got status=%q, want delivered (overwritten)", got.Status)
+			if tt.query != "" {
+				got, err := store.FindByID(ctx, tt.query)
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("got err %v, want %v", err, tt.wantErr)
+				}
+				if err == nil && got.Status != tt.wantStatus {
+					t.Errorf("status = %q, want %q", got.Status, tt.wantStatus)
+				}
+			}
+		})
 	}
 }

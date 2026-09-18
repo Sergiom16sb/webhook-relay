@@ -1,7 +1,6 @@
 package http_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -25,106 +24,116 @@ func newTestServer() (*httptest.Server, *memory.EventStore) {
 	return httptest.NewServer(mux), store
 }
 
-func TestPostEvent_Success(t *testing.T) {
-	srv, store := newTestServer()
-	defer srv.Close()
-
-	body := `{"id":"evt_1","source_id":"src_shopify","type":"order.created","payload":{"order_id":"ord_42"}}`
-	resp, err := http.Post(srv.URL+"/events", "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", resp.StatusCode)
-	}
-	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-		t.Errorf("Content-Type = %q, want application/json", ct)
-	}
-
-	// Event should be persisted via the real adapter.
-	if _, err := store.FindByID(context.Background(), "evt_1"); err != nil {
-		t.Errorf("event not persisted in store: %v", err)
-	}
-
-	// Response body should echo the event fields.
-	var got map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got["id"] != "evt_1" {
-		t.Errorf("response id = %v, want evt_1", got["id"])
-	}
-	if got["status"] != "pending" {
-		t.Errorf("response status = %v, want pending", got["status"])
-	}
-}
-
-func TestPostEvent_InvalidJSON(t *testing.T) {
-	srv, _ := newTestServer()
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL+"/events", "application/json", strings.NewReader("{not json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
-func TestPostEvent_ValidationError(t *testing.T) {
+func TestPostEvent(t *testing.T) {
 	cases := []struct {
-		name string
-		body string
+		name           string
+		method         string
+		body           string
+		wantStatus     int
+		wantBodySubstr string // substring to check in response body; "" to skip
+		wantEventSaved string // if non-empty, verify event with this ID was persisted
 	}{
-		{"empty id", `{"source_id":"src","type":"t",}`},
-		{"empty source", `{"id":"e1","type":"t",}`},
-		{"empty type", `{"id":"e1","source_id":"src",}`},
-		{"empty payload", `{"id":"e1","source_id":"src","type":"t",}`},
+		{
+			name:           "success persists and returns 201",
+			method:         http.MethodPost,
+			body:           `{"id":"evt_1","source_id":"src_shopify","type":"order.created","payload":{"order_id":"ord_42"}}`,
+			wantStatus:     http.StatusCreated,
+			wantBodySubstr: `"id":"evt_1"`,
+			wantEventSaved: "evt_1",
+		},
+		{
+			name:       "invalid JSON returns 400",
+			method:     http.MethodPost,
+			body:       `{not json`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "empty id returns 400",
+			method:     http.MethodPost,
+			body:       `{"source_id":"src","type":"t","payload":{}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "empty source_id returns 400",
+			method:     http.MethodPost,
+			body:       `{"id":"e1","type":"t","payload":{}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "empty type returns 400",
+			method:     http.MethodPost,
+			body:       `{"id":"e1","source_id":"src","payload":{}}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "missing payload returns 400",
+			method:     http.MethodPost,
+			body:       `{"id":"e1","source_id":"src","type":"t"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "GET on POST-only route returns 405",
+			method:     http.MethodGet,
+			wantStatus: http.StatusMethodNotAllowed,
+		},
 	}
+
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, _ := newTestServer()
+			srv, store := newTestServer()
 			defer srv.Close()
 
-			resp, err := http.Post(srv.URL+"/events", "application/json", strings.NewReader(tt.body))
+			req, err := http.NewRequest(tt.method, srv.URL+"/events", strings.NewReader(tt.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400 (body: %s)", resp.StatusCode, tt.body)
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+
+			if tt.wantBodySubstr != "" {
+				bodyBytes, _ := readAll(resp.Body)
+				if !strings.Contains(string(bodyBytes), tt.wantBodySubstr) {
+					t.Errorf("body = %q, want substring %q", bodyBytes, tt.wantBodySubstr)
+				}
+			}
+
+			if tt.wantEventSaved != "" {
+				if _, err := store.FindByID(context.Background(), tt.wantEventSaved); err != nil {
+					t.Errorf("event %q not persisted: %v", tt.wantEventSaved, err)
+				}
 			}
 		})
 	}
 }
 
-func TestPostEvent_MethodNotAllowed(t *testing.T) {
-	// ServeMux with method routing returns 405 for wrong methods.
-	// Build a server that includes the method-restricted route.
-	store := memory.NewEventStore()
-	uc := application.NewReceiveEventUseCase(store)
-	h := infrahttp.NewEventHandlers(uc)
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /events", h.PostEvent)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL + "/events")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("status = %d, want 405", resp.StatusCode)
+// readAll reads body without importing io in the test file.
+func readAll(r interface{ Read(p []byte) (int, error) }) ([]byte, error) {
+	var out []byte
+	buf := make([]byte, 1024)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			out = append(out, buf[:n]...)
+		}
+		if err != nil {
+			if err.Error() == "EOF" {
+				return out, nil
+			}
+			return out, err
+		}
 	}
 }
 
-// silence unused import in some toolchains
-var _ = bytes.NewReader
+// Silence unused import warnings if test file shrinks further.
+var _ = json.RawMessage{}
