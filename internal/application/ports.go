@@ -12,9 +12,10 @@ import (
 // Adapters in internal/infra/ implement this interface — typing estructural
 // makes the binding automatic; no `implements` keyword needed.
 type EventStore interface {
-	// Save persists an event. Returns ErrEventNotFound if the store rejects
-	// a duplicate ID (caller's choice — depends on idempotency strategy).
-	Save(ctx context.Context, e *domain.Event) error
+	// Save persists an event idempotently by (source_id, payload_hash).
+	// Returns the persisted event (whether newly created or pre-existing).
+	// On idempotent retry, the SAME event ID is returned both times.
+	Save(ctx context.Context, e *domain.Event) (*domain.Event, error)
 
 	// FindByID returns the event for the given ID. Returns ErrEventNotFound
 	// if no event with that ID exists.

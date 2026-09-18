@@ -60,11 +60,13 @@ func TestEventStore(t *testing.T) {
 			wantErr: application.ErrEventNotFound,
 		},
 		{
-			name:       "save overwrites existing id",
+			// Idempotency: same payload hash = first event wins. The second
+			// "delivered" save is ignored. This test verifies the dedup contract.
+			name:       "save with same payload hash is idempotent (first wins)",
 			seed:       []*domain.Event{validEvent("evt_1")},
-			save:       deliveredEvent("evt_1"),
+			save:       deliveredEvent("evt_1"), // intentionally different status
 			query:      "evt_1",
-			wantStatus: domain.EventStatusDelivered,
+			wantStatus: domain.EventStatusPending, // first write preserved
 		},
 	}
 
@@ -74,13 +76,13 @@ func TestEventStore(t *testing.T) {
 			ctx := context.Background()
 
 			for _, e := range tt.seed {
-				if err := store.Save(ctx, e); err != nil {
+				if _, err := store.Save(ctx, e); err != nil {
 					t.Fatalf("seed save: %v", err)
 				}
 			}
 
 			if tt.save != nil {
-				if err := store.Save(ctx, tt.save); err != nil {
+				if _, err := store.Save(ctx, tt.save); err != nil {
 					t.Fatalf("save: %v", err)
 				}
 			}

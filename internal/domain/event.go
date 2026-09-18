@@ -34,6 +34,11 @@ type Event struct {
 	Payload   json.RawMessage `json:"payload"`
 	Status    EventStatus     `json:"status"`
 	CreatedAt time.Time       `json:"created_at"`
+
+	// PayloadHash is computed by the use case from the raw Payload bytes.
+	// Used by the store to dedup — same (source_id, payload_hash) = same event.
+	// Not serialized: callers don't provide it; the server computes it.
+	PayloadHash string `json:"-"`
 }
 
 // Sentinel errors for Event validation. Use errors.Is to detect.

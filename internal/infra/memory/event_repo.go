@@ -12,34 +12,52 @@ import (
 )
 
 // Compile-time check: this struct satisfies application.EventStore.
-// If you remove or rename a method on the port, build fails here.
 var _ application.EventStore = (*EventStore)(nil)
 
 // EventStore is the in-memory implementation of the EventStore port.
 // RWMutex: many concurrent reads OK, writes exclusive.
 type EventStore struct {
-	mu   sync.RWMutex
-	data map[string]*domain.Event
+	mu     sync.RWMutex
+	byID   map[string]*domain.Event // for FindByID
+	byHash map[string]*domain.Event // for idempotent dedup
 }
 
 // NewEventStore returns an initialized EventStore.
 func NewEventStore() *EventStore {
-	return &EventStore{data: make(map[string]*domain.Event)}
+	return &EventStore{
+		byID:   make(map[string]*domain.Event),
+		byHash: make(map[string]*domain.Event),
+	}
 }
 
-// Save stores the event. Overwrites if ID exists (callers control idempotency).
-func (s *EventStore) Save(_ context.Context, e *domain.Event) error {
+// hashKey returns the dedup key for an event.
+func hashKey(sourceID, payloadHash string) string {
+	return sourceID + ":" + payloadHash
+}
+
+// Save stores the event idempotently by (source_id, payload_hash).
+// Returns the event — whether newly inserted or pre-existing — so the
+// caller always gets a non-nil event back (idempotent retry contract).
+func (s *EventStore) Save(_ context.Context, e *domain.Event) (*domain.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.data[e.ID] = e
-	return nil
+
+	key := hashKey(e.SourceID, e.PayloadHash)
+	if existing, ok := s.byHash[key]; ok {
+		// Idempotent hit — return existing, don't insert.
+		return existing, nil
+	}
+
+	s.byID[e.ID] = e
+	s.byHash[key] = e
+	return e, nil
 }
 
 // FindByID returns the event for the given ID.
 func (s *EventStore) FindByID(_ context.Context, id string) (*domain.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	e, ok := s.data[id]
+	e, ok := s.byID[id]
 	if !ok {
 		return nil, application.ErrEventNotFound
 	}

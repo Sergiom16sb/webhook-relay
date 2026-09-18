@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 
@@ -21,29 +23,42 @@ func NewReceiveEventUseCase(store EventStore) *ReceiveEventUseCase {
 }
 
 // Execute persists a new event with the given ID, source, type, and payload.
-// The ID is caller-provided so the use case stays focused on persistence.
-// (UUID generation will move into a Clock/IDGenerator port later if needed.)
+// Returns the persisted event (with CreatedAt and PayloadHash populated) or
+// a validation error from domain.Validate.
 //
-// Returns the persisted event (with CreatedAt populated) or a validation
-// error from domain.Validate.
+// Idempotency: PayloadHash is computed from raw Payload bytes. Same
+// (source_id, payload_hash) = duplicate → store returns existing event
+// instead of inserting a new one. The caller (handler) gets the existing
+// event ID back either way.
 func (uc *ReceiveEventUseCase) Execute(
 	ctx context.Context,
 	id, sourceID, eventType string,
 	payload json.RawMessage,
 ) (*domain.Event, error) {
 	e := &domain.Event{
-		ID:        id,
-		SourceID:  sourceID,
-		Type:      eventType,
-		Payload:   payload,
-		Status:    domain.EventStatusPending,
-		CreatedAt: time.Now().UTC(),
+		ID:          id,
+		SourceID:    sourceID,
+		Type:        eventType,
+		Payload:     payload,
+		Status:      domain.EventStatusPending,
+		CreatedAt:   time.Now().UTC(),
+		PayloadHash: hashPayload(payload),
 	}
 	if err := e.Validate(); err != nil {
 		return nil, err
 	}
-	if err := uc.store.Save(ctx, e); err != nil {
+	saved, err := uc.store.Save(ctx, e)
+	if err != nil {
 		return nil, err
 	}
-	return e, nil
+	return saved, nil
+}
+
+// hashPayload computes sha256 of the raw payload bytes.
+// Note: whitespace differences in JSON produce different hashes. For true
+// cross-format idempotency, callers should canonicalize JSON before sending
+// (e.g., minify + sort keys). For v1, byte-exact match is enough.
+func hashPayload(payload []byte) string {
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
 }
