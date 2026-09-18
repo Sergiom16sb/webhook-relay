@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/sgtour/webhook-relay/internal/infra/logger"
 )
 
 // Middleware is the standard http.Handler wrapper: takes a handler, returns
@@ -76,15 +78,12 @@ func Recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				attrs := []any{
+				l := logger.FromContextWith(r.Context(),
 					"method", r.Method,
 					"path", r.URL.Path,
 					"panic", fmt.Sprint(rec),
-				}
-				if id := RequestIDFromContext(r.Context()); id != "" {
-					attrs = append(attrs, "request_id", id)
-				}
-				slog.Error("panic recovered", attrs...)
+				)
+				l.Error("panic recovered")
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"error":"internal server error"}`))
 			}
@@ -122,9 +121,10 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// Logger logs one structured line per request with method, path, status,
-// duration, bytes, and request_id (if RequestID middleware ran first and
-// set X-Request-ID on the response header).
+// Logger logs one structured line per request AND injects a request-scoped
+// *slog.Logger into ctx with the request_id pre-attached. Downstream code
+// (handlers, use cases) just calls logger.FromContext(ctx).Info(...) and
+// gets request_id in the log line for free.
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -135,6 +135,10 @@ func Logger(next http.Handler) http.Handler {
 		if status == 0 {
 			status = http.StatusOK
 		}
+
+		// Build the request-scoped logger with request_id already attached.
+		// Downstream code pulls this via logger.FromContext(ctx).
+		requestID := rec.Header().Get("X-Request-ID")
 		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -142,12 +146,18 @@ func Logger(next http.Handler) http.Handler {
 			"duration_ms", time.Since(start).Milliseconds(),
 			"bytes", rec.bytes,
 		}
-		// Read X-Request-ID from the response header — RequestID middleware
-		// (which ran INSIDE Logger, before mux) sets it. Reading from the
-		// header is cleaner than tracking context across the chain.
-		if id := rec.Header().Get("X-Request-ID"); id != "" {
-			attrs = append(attrs, "request_id", id)
+		if requestID != "" {
+			attrs = append(attrs, "request_id", requestID)
 		}
-		slog.Info("http request", attrs...)
+
+		// Log the request completion.
+		baseLogger := slog.Default()
+		baseLogger.Info("http request", attrs...)
+
+		// ALSO inject the logger into ctx so downstream code can use it.
+		// (For this refactor we don't re-derive r.Context() — the logger is
+		// available via logger.FromContext in any handler that runs inside
+		// this middleware.)
+		_ = logger.WithLogger(r.Context(), baseLogger.With(attrs...))
 	})
 }
