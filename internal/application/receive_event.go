@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/sgtour/webhook-platform-go/internal/domain"
+	"github.com/sgtour/webhook-relay/internal/domain"
 )
 
 // ReceiveEventUseCase handles incoming webhook events.

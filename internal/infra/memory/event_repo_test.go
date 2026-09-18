@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgtour/webhook-platform-go/internal/application"
-	"github.com/sgtour/webhook-platform-go/internal/domain"
-	"github.com/sgtour/webhook-platform-go/internal/infra/memory"
+	"github.com/sgtour/webhook-relay/internal/application"
+	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/sgtour/webhook-relay/internal/infra/memory"
 )
 
 // validEvent returns an Event that passes Validate.

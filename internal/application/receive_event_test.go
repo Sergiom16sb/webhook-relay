@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sgtour/webhook-platform-go/internal/application"
-	"github.com/sgtour/webhook-platform-go/internal/domain"
+	"github.com/sgtour/webhook-relay/internal/application"
+	"github.com/sgtour/webhook-relay/internal/domain"
 )
 
 // fakeStore is a hand-rolled test fake. Demonstrates why consumer-side

@@ -5,7 +5,7 @@ package application
 import (
 	"context"
 
-	"github.com/sgtour/webhook-platform-go/internal/domain"
+	"github.com/sgtour/webhook-relay/internal/domain"
 )
 
 // EventStore is the port the application needs to persist events.
