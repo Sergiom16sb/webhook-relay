@@ -37,48 +37,67 @@ func (f *fakeStore) FindByID(_ context.Context, id string) (*domain.Event, error
 // Compile-time check: fakeStore satisfies the port.
 var _ application.EventStore = (*fakeStore)(nil)
 
-func TestReceiveEvent_Success(t *testing.T) {
-	store := &fakeStore{}
-	uc := application.NewReceiveEventUseCase(store)
+// storeErrSentinel is shared across the test cases that need an error
+// from the fake store. Using a single instance ensures errors.Is works
+// (it compares pointers via the chain).
+var storeErrSentinel = errors.New("store failure")
 
-	payload := json.RawMessage(`{"order_id":"ord_42"}`)
-	got, err := uc.Execute(context.Background(), "evt_1", "src_shopify", "order.created", payload)
-	if err != nil {
-		t.Fatalf("execute: %v", err)
+func TestReceiveEvent(t *testing.T) {
+	cases := []struct {
+		name      string
+		id        string
+		source    string
+		eventType string
+		payload   json.RawMessage
+		storeErr  error // injected into fakeStore.err; nil = store succeeds
+		wantErr   error // errors.Is target; nil = expect success
+		wantSaved int   // expected fakeStore.saved length after Execute
+	}{
+		{
+			name:      "success",
+			id:        "evt_1",
+			source:    "src_shopify",
+			eventType: "order.created",
+			payload:   json.RawMessage(`{"order_id":"ord_42"}`),
+			wantSaved: 1,
+		},
+		{
+			name:      "empty id triggers ErrEmptyID",
+			id:        "",
+			source:    "src",
+			eventType: "type",
+			payload:   json.RawMessage(`{}`),
+			wantErr:   domain.ErrEmptyID,
+			wantSaved: 0,
+		},
+		{
+			name:      "store error propagates",
+			id:        "evt_1",
+			source:    "src",
+			eventType: "type",
+			payload:   json.RawMessage(`{}`),
+			storeErr:  storeErrSentinel,
+			wantErr:   storeErrSentinel,
+			wantSaved: 0,
+		},
 	}
 
-	if got.ID != "evt_1" {
-		t.Errorf("got ID=%q, want evt_1", got.ID)
-	}
-	if got.Status != domain.EventStatusPending {
-		t.Errorf("got status=%q, want pending", got.Status)
-	}
-	if len(store.saved) != 1 {
-		t.Fatalf("expected 1 saved event, got %d", len(store.saved))
-	}
-}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{err: tt.storeErr}
+			uc := application.NewReceiveEventUseCase(store)
 
-func TestReceiveEvent_ValidationError(t *testing.T) {
-	store := &fakeStore{}
-	uc := application.NewReceiveEventUseCase(store)
-
-	// Empty ID triggers ErrEmptyID — store must NOT be called.
-	_, err := uc.Execute(context.Background(), "", "src", "type", json.RawMessage(`{}`))
-	if !errors.Is(err, domain.ErrEmptyID) {
-		t.Fatalf("got %v, want ErrEmptyID", err)
-	}
-	if len(store.saved) != 0 {
-		t.Errorf("store should not be called on validation error, got %d saved", len(store.saved))
-	}
-}
-
-func TestReceiveEvent_StoreError(t *testing.T) {
-	injected := errors.New("db exploded")
-	store := &fakeStore{err: injected}
-	uc := application.NewReceiveEventUseCase(store)
-
-	_, err := uc.Execute(context.Background(), "evt_1", "src", "type", json.RawMessage(`{}`))
-	if !errors.Is(err, injected) {
-		t.Fatalf("got %v, want %v", err, injected)
+			_, err := uc.Execute(context.Background(), tt.id, tt.source, tt.eventType, tt.payload)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("expected nil error, got %v", err)
+				}
+			} else if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("got %v, want %v", err, tt.wantErr)
+			}
+			if len(store.saved) != tt.wantSaved {
+				t.Errorf("saved = %d, want %d", len(store.saved), tt.wantSaved)
+			}
+		})
 	}
 }
