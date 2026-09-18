@@ -1,24 +1,33 @@
 // Package main — composition root for the webhook relay API.
 //
-// Step 1.1 of the plan: bootstrap with a hello healthz endpoint.
-// Future steps add handlers (POST /webhooks/:source_id), middleware, and
-// dependency injection. This file stays small — only wire-up logic.
+// This file is the ONLY one that knows about all concrete types.
+// It wires adapters to use cases to handlers. Use cases never know
+// which adapter they're using; handlers never know which use case.
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/sgtour/webhook-relay/internal/application"
+	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
+	"github.com/sgtour/webhook-relay/internal/infra/memory"
 )
 
 func main() {
+	// Wire concrete adapters to use cases.
+	store := memory.NewEventStore()
+	receiveEvent := application.NewReceiveEventUseCase(store)
+
+	// Wire use cases to handlers.
+	handlers := infrahttp.NewEventHandlers(receiveEvent)
+
+	// Mux with method-aware routing (Go 1.22+).
 	mux := http.NewServeMux()
-	// Health check endpoint. Step 1.7 will replace `log` with `log/slog`.
-	// `mux.HandleFunc` (not the package-level `http.HandleFunc`) keeps the
-	// mux local — easier to extend in later steps without global state.
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "hello")
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("hello"))
 	})
+	mux.HandleFunc("POST /events", handlers.PostEvent)
 
 	addr := ":8080"
 	log.Printf("api listening on %s", addr)
