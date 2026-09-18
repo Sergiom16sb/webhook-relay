@@ -31,45 +31,70 @@ func NewEventStore(db *sqlx.DB) *EventStore {
 // eventRow mirrors the DB schema for scanning. Different from domain.Event
 // because Postgres types differ slightly (JSONB = []byte, TIMESTAMPTZ = time.Time).
 type eventRow struct {
-	ID        string    `db:"id"`
-	SourceID  string    `db:"source_id"`
-	Type      string    `db:"type"`
-	Payload   []byte    `db:"payload"`
-	Status    string    `db:"status"`
-	CreatedAt time.Time `db:"created_at"`
+	ID          string    `db:"id"`
+	SourceID    string    `db:"source_id"`
+	Type        string    `db:"type"`
+	Payload     []byte    `db:"payload"`
+	Status      string    `db:"status"`
+	CreatedAt   time.Time `db:"created_at"`
+	PayloadHash string    `db:"payload_hash"`
 }
 
 // toDomain converts a row to a domain.Event.
 func (r *eventRow) toDomain() *domain.Event {
 	return &domain.Event{
-		ID:        r.ID,
-		SourceID:  r.SourceID,
-		Type:      r.Type,
-		Payload:   r.Payload, // []byte satisfies json.RawMessage ([]byte alias)
-		Status:    domain.EventStatus(r.Status),
-		CreatedAt: r.CreatedAt,
+		ID:          r.ID,
+		SourceID:    r.SourceID,
+		Type:        r.Type,
+		Payload:     r.Payload, // []byte satisfies json.RawMessage ([]byte alias)
+		Status:      domain.EventStatus(r.Status),
+		CreatedAt:   r.CreatedAt,
+		PayloadHash: r.PayloadHash,
 	}
 }
 
-// Save persists an event. Upserts on ID conflict (caller controls idempotency).
-func (s *EventStore) Save(ctx context.Context, e *domain.Event) error {
+// Save persists an event idempotently by (source_id, payload_hash).
+// Same tuple = existing event returned (no new row, no duplicate key).
+//
+// Implementation: INSERT ... ON CONFLICT DO UPDATE SET id = events.id RETURNING *
+// - DO UPDATE with id = id is a no-op update that forces RETURNING to emit the row.
+// - Whether we just inserted OR the row pre-existed, RETURNING gives us the same row.
+// - The caller gets the same event ID either way (idempotent retry).
+func (s *EventStore) Save(ctx context.Context, e *domain.Event) (*domain.Event, error) {
 	const q = `
-		INSERT INTO events (id, source_id, type, payload, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE SET
-			source_id = EXCLUDED.source_id,
-			type      = EXCLUDED.type,
-			payload   = EXCLUDED.payload,
-			status    = EXCLUDED.status
+		INSERT INTO events (id, source_id, type, payload, status, created_at, payload_hash)
+		VALUES (:id, :source_id, :type, :payload, :status, :created_at, :payload_hash)
+		ON CONFLICT (source_id, payload_hash) DO UPDATE SET id = events.id
+		RETURNING *
 	`
-	_, err := s.db.ExecContext(ctx, q,
-		e.ID, e.SourceID, e.Type, []byte(e.Payload), string(e.Status), e.CreatedAt)
-	return err
+	row := eventRow{
+		ID:          e.ID,
+		SourceID:    e.SourceID,
+		Type:        e.Type,
+		Payload:     []byte(e.Payload),
+		Status:      string(e.Status),
+		CreatedAt:   e.CreatedAt,
+		PayloadHash: e.PayloadHash,
+	}
+	rows, err := s.db.NamedQueryContext(ctx, q, row)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		// RETURNING should always emit one row (either inserted or no-op-updated).
+		// If we get here something is very wrong.
+		return nil, errors.New("postgres: upsert returned no rows")
+	}
+	if err := rows.StructScan(&row); err != nil {
+		return nil, err
+	}
+	return row.toDomain(), nil
 }
 
 // FindByID returns the event for the given ID, or ErrEventNotFound.
 func (s *EventStore) FindByID(ctx context.Context, id string) (*domain.Event, error) {
-	const q = `SELECT id, source_id, type, payload, status, created_at FROM events WHERE id = $1`
+	const q = `SELECT id, source_id, type, payload, status, created_at, payload_hash FROM events WHERE id = $1`
 	var row eventRow
 	if err := s.db.GetContext(ctx, &row, q, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

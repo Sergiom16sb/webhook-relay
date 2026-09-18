@@ -2,6 +2,8 @@ package postgres_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -83,7 +85,7 @@ func TestEventStore_SaveAndFindByID(t *testing.T) {
 
 	ctx := context.Background()
 	in := validEvent("evt_1")
-	if err := store.Save(ctx, in); err != nil {
+	if _, err := store.Save(ctx, in); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -128,18 +130,64 @@ func TestEventStore_Overwrite(t *testing.T) {
 	ctx := context.Background()
 	e1 := validEvent("evt_1")
 	e1.Status = domain.EventStatusPending
-	if err := store.Save(ctx, e1); err != nil {
+	if _, err := store.Save(ctx, e1); err != nil {
 		t.Fatal(err)
 	}
 
+	// Second save with same payload hash — idempotent, returns e1.
 	e2 := validEvent("evt_1")
-	e2.Status = domain.EventStatusDelivered
-	if err := store.Save(ctx, e2); err != nil {
+	e2.Status = domain.EventStatusDelivered // intentionally different
+	if _, err := store.Save(ctx, e2); err != nil {
 		t.Fatal(err)
 	}
 
 	got, _ := store.FindByID(ctx, "evt_1")
-	if got.Status != domain.EventStatusDelivered {
-		t.Errorf("status = %q, want delivered (overwritten)", got.Status)
+	// Idempotency: e2 is ignored — first event wins. Status stays "pending".
+	if got.Status != domain.EventStatusPending {
+		t.Errorf("status = %q, want pending (idempotent — first write wins)", got.Status)
 	}
+	if got.ID != "evt_1" {
+		t.Errorf("id = %q, want evt_1", got.ID)
+	}
+}
+
+// TestEventStore_DifferentPayload — different payload, different event.
+func TestEventStore_DifferentPayload(t *testing.T) {
+	store, cleanup := setup(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	e1 := validEvent("evt_1")
+	e1.Payload = json.RawMessage(`{"order_id":"ord_42"}`)
+	e1.PayloadHash = sha256hex([]byte(e1.Payload))
+	if _, err := store.Save(ctx, e1); err != nil {
+		t.Fatal(err)
+	}
+
+	e2 := validEvent("evt_2")
+	e2.Payload = json.RawMessage(`{"order_id":"ord_99"}`) // different payload
+	e2.PayloadHash = sha256hex([]byte(e2.Payload))
+	if _, err := store.Save(ctx, e2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both events exist independently.
+	got1, err := store.FindByID(ctx, "evt_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, err := store.FindByID(ctx, "evt_2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got1.ID != "evt_1" || got2.ID != "evt_2" {
+		t.Errorf("ids wrong: %s, %s", got1.ID, got2.ID)
+	}
+}
+
+// sha256hex computes sha256 hex — same as application.hashPayload.
+func sha256hex(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
 }

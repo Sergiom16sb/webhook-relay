@@ -8,6 +8,7 @@ import (
 
 	"github.com/sgtour/webhook-relay/internal/application"
 	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/sgtour/webhook-relay/internal/infra/memory"
 )
 
 // fakeStore is a hand-rolled test fake. Demonstrates why consumer-side
@@ -17,12 +18,12 @@ type fakeStore struct {
 	err   error // inject for error-path tests
 }
 
-func (f *fakeStore) Save(_ context.Context, e *domain.Event) error {
+func (f *fakeStore) Save(_ context.Context, e *domain.Event) (*domain.Event, error) {
 	if f.err != nil {
-		return f.err
+		return nil, f.err
 	}
 	f.saved = append(f.saved, e)
-	return nil
+	return e, nil
 }
 
 func (f *fakeStore) FindByID(_ context.Context, id string) (*domain.Event, error) {
@@ -99,5 +100,48 @@ func TestReceiveEvent(t *testing.T) {
 				t.Errorf("saved = %d, want %d", len(store.saved), tt.wantSaved)
 			}
 		})
+	}
+}
+
+// TestReceiveEvent_Idempotency — same payload twice returns same event ID.
+// Uses memory store directly to verify the (source_id, payload_hash) dedup.
+func TestReceiveEvent_Idempotency(t *testing.T) {
+	store := memory.NewEventStore()
+	uc := application.NewReceiveEventUseCase(store)
+
+	payload := json.RawMessage(`{"order_id":"ord_42","amount":99}`)
+	ctx := context.Background()
+
+	// First call: creates event.
+	first, err := uc.Execute(ctx, "evt_first", "src_shopify", "order.created", payload)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+
+	// Second call with same payload but different ID: dedup returns first.
+	second, err := uc.Execute(ctx, "evt_second", "src_shopify", "order.created", payload)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+
+	if first.ID != second.ID {
+		t.Errorf("idempotency broken: got %q and %q, want same", first.ID, second.ID)
+	}
+
+	// Verify only one event in storage.
+	got, err := store.FindByID(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if got.ID != first.ID {
+		t.Errorf("retrieved event id = %q, want %q", got.ID, first.ID)
+	}
+
+	// Verify PayloadHash is computed and stable.
+	if first.PayloadHash == "" {
+		t.Error("PayloadHash should be populated by use case")
+	}
+	if first.PayloadHash != second.PayloadHash {
+		t.Errorf("hash differs: %q vs %q", first.PayloadHash, second.PayloadHash)
 	}
 }
