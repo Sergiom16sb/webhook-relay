@@ -35,6 +35,23 @@ func (f *fakeStore) FindByID(_ context.Context, id string) (*domain.Event, error
 	return nil, application.ErrEventNotFound
 }
 
+func (f *fakeStore) List(_ context.Context, limit, offset int) ([]*domain.Event, error) {
+	if offset >= len(f.saved) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(f.saved) {
+		end = len(f.saved)
+	}
+	out := make([]*domain.Event, end-offset)
+	copy(out, f.saved[offset:end])
+	return out, nil
+}
+
+func (f *fakeStore) Count(_ context.Context) (int, error) {
+	return len(f.saved), nil
+}
+
 // Compile-time check: fakeStore satisfies the port.
 var _ application.EventStore = (*fakeStore)(nil)
 

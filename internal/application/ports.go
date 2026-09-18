@@ -20,6 +20,14 @@ type EventStore interface {
 	// FindByID returns the event for the given ID. Returns ErrEventNotFound
 	// if no event with that ID exists.
 	FindByID(ctx context.Context, id string) (*domain.Event, error)
+
+	// List returns a page of events, ordered by created_at DESC.
+	// limit: max events per page. offset: events to skip.
+	// Empty list + nil error if no events match.
+	List(ctx context.Context, limit, offset int) ([]*domain.Event, error)
+
+	// Count returns the total number of events (no pagination).
+	Count(ctx context.Context) (int, error)
 }
 
 // SignatureVerifier verifies a signature over a payload using a secret.
