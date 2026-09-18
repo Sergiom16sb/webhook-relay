@@ -3,8 +3,10 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/sgtour/webhook-relay/internal/application"
@@ -16,11 +18,13 @@ import (
 // All business logic lives in the use case or domain.
 type EventHandlers struct {
 	receiveEvent *application.ReceiveEventUseCase
+	verifier     application.SignatureVerifier // nil disables signature check
 }
 
 // NewEventHandlers constructs the handler with the injected use case.
-func NewEventHandlers(receive *application.ReceiveEventUseCase) *EventHandlers {
-	return &EventHandlers{receiveEvent: receive}
+// Pass verifier=nil to disable signature verification (dev/testing only).
+func NewEventHandlers(receive *application.ReceiveEventUseCase, verifier application.SignatureVerifier) *EventHandlers {
+	return &EventHandlers{receiveEvent: receive, verifier: verifier}
 }
 
 // postEventRequest is the wire format for POST /events.
@@ -52,15 +56,40 @@ func toResponse(e *domain.Event) postEventResponse {
 
 // PostEvent handles POST /events.
 //
-// Body:  {"id":"...", "source_id":"...", "type":"...", "payload":{...}}
-// Status:
+// Security: verifies X-Webhook-Signature over the raw request body
+// BEFORE parsing JSON. This is the order that matters — parsing first
+// would change whitespace/keys and break the signature.
+//
+// Status codes:
 //
 //	201 Created on success
 //	400 Bad Request on invalid JSON or validation error
+//	401 Unauthorized on missing/invalid signature
 //	500 Internal Server Error on store failure
 func (h *EventHandlers) PostEvent(w http.ResponseWriter, r *http.Request) {
+	// Read raw body once. The verifier needs the EXACT bytes the sender
+	// signed — re-encoding via Decode would normalize whitespace and break.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "could not read body")
+		return
+	}
+	defer r.Body.Close()
+
+	// Verify signature over raw bytes. Only if a verifier was injected.
+	if h.verifier != nil {
+		sig := r.Header.Get("X-Webhook-Signature")
+		if err := h.verifier.Verify(body, sig); err != nil {
+			// All signature failures collapse to 401 — no info leak
+			// about WHY (bad hex vs missing vs mismatch).
+			writeJSONError(w, http.StatusUnauthorized, "invalid signature")
+			return
+		}
+	}
+
+	// Decode from the bytes we already read (not from r.Body again).
 	var req postEventRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -77,7 +106,7 @@ func (h *EventHandlers) PostEvent(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(toResponse(e))
 }
 
-// mapError converts domain errors to HTTP status codes.
+// mapError converts domain/application errors to HTTP status codes.
 // Keeps status mapping here (transport concern), not in the use case.
 func mapError(err error) (int, string) {
 	switch {

@@ -20,3 +20,14 @@ type EventStore interface {
 	// if no event with that ID exists.
 	FindByID(ctx context.Context, id string) (*domain.Event, error)
 }
+
+// SignatureVerifier verifies a signature over a payload using a secret.
+// The adapter (HMAC, RSA, etc.) is chosen in infra; the use case only
+// sees this interface and doesn't care about the algorithm.
+//
+// Verify returns nil if the signature is valid, ErrInvalidSignature
+// otherwise. Other errors (malformed input, missing secret) should be
+// surfaced distinctly so the handler can return 400 vs 401.
+type SignatureVerifier interface {
+	Verify(payload []byte, signature string) error
+}

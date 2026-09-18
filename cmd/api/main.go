@@ -22,6 +22,7 @@ import (
 	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
 	"github.com/sgtour/webhook-relay/internal/infra/memory"
 	pgadapter "github.com/sgtour/webhook-relay/internal/infra/postgres"
+	"github.com/sgtour/webhook-relay/internal/infra/webhook"
 	"github.com/sgtour/webhook-relay/internal/infra/worker"
 )
 
@@ -51,8 +52,24 @@ func main() {
 
 	receiveEvent := application.NewReceiveEventUseCase(store)
 
+	// Build signature verifier from WEBHOOK_SECRET env var. If unset,
+	// signature verification is DISABLED — never do this in production,
+	// but useful for local dev and tests.
+	var verifier application.SignatureVerifier
+	if secret := os.Getenv("WEBHOOK_SECRET"); secret != "" {
+		v, err := webhook.NewHMACVerifier(secret)
+		if err != nil {
+			slog.Error("hmac verifier init failed", "error", err)
+			os.Exit(1)
+		}
+		verifier = v
+		slog.Info("hmac signature verification enabled")
+	} else {
+		slog.Warn("WEBHOOK_SECRET not set — signature verification DISABLED (dev mode only)")
+	}
+
 	// Wire use cases to handlers.
-	handlers := infrahttp.NewEventHandlers(receiveEvent)
+	handlers := infrahttp.NewEventHandlers(receiveEvent, verifier)
 
 	// Mux with method-aware routing (Go 1.22+).
 	mux := http.NewServeMux()
