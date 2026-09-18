@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver registration
@@ -20,20 +22,32 @@ import (
 	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
 	"github.com/sgtour/webhook-relay/internal/infra/memory"
 	pgadapter "github.com/sgtour/webhook-relay/internal/infra/postgres"
+	"github.com/sgtour/webhook-relay/internal/infra/worker"
 )
 
 func main() {
-	// Structured logging to stdout in JSON format. Production default.
+	// Structured logging to stdout in JSON format.
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
 
+	// Root context — cancelled on SIGINT/SIGTERM. All long-lived components
+	// (pool, server) inherit from this. Cleanup is graceful.
+	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Wire the store based on DATABASE_URL.
-	// - Set: connect to Postgres, run migrations, use Postgres adapter
-	// - Unset: fall back to in-memory (dev mode, tests, demos)
-	ctx := context.Background()
-	store := buildStore(ctx)
+	store := buildStore(rootCtx)
 	defer store.Close()
+
+	// Global worker pool (see Step 1.10 design decision: per-request would
+	// defeat the purpose of a webhook relay — delivery must survive client
+	// cancellation). Pool inherits from rootCtx so SIGTERM cancels in-flight
+	// workers cleanly.
+	const poolWorkers = 5
+	const poolBuffer = 100
+	pool := worker.NewPool(rootCtx, poolWorkers, poolBuffer)
+	defer pool.Close()
 
 	receiveEvent := application.NewReceiveEventUseCase(store)
 
@@ -55,12 +69,41 @@ func main() {
 		infrahttp.Logger,
 	)
 
-	addr := ":8080"
-	slog.Info("api listening", "addr", addr)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		slog.Error("server failed", "error", err)
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:              ":8080",
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second, // prevent slowloris
 	}
+
+	// Run server in goroutine. ListenAndServe blocks; main goroutine waits
+	// for signal then triggers shutdown.
+	go func() {
+		slog.Info("api listening", "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("server failed", "error", err)
+			stop() // cancel rootCtx to trigger shutdown path
+		}
+	}()
+
+	// Block until SIGINT/SIGTERM (or server failure above).
+	<-rootCtx.Done()
+	slog.Info("shutdown signal received, draining...")
+
+	// Phase 1: stop accepting new HTTP requests, wait for in-flight to finish.
+	// In-flight handlers may Submit jobs to the pool — those need the pool
+	// still alive, which is why we Close() the pool AFTER the server.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("http shutdown", "error", err)
+	} else {
+		slog.Info("http server stopped cleanly")
+	}
+
+	// Phase 2: drain the worker pool. No new jobs (server stopped). Workers
+	// exit on rootCtx.Done() (cancelled) or jobsCh close.
+	pool.Close()
+	slog.Info("worker pool drained")
 }
 
 // closableStore wraps an EventStore with a Close method for cleanup.
@@ -95,7 +138,6 @@ func buildStore(ctx context.Context) *closableStore {
 		os.Exit(1)
 	}
 
-	// Verify connection with a ping (with timeout via ctx).
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(pingCtx); err != nil {
@@ -114,6 +156,3 @@ func buildStore(ctx context.Context) *closableStore {
 		closeFn:    db.Close,
 	}
 }
-
-// Silence unused import warnings (errors is used via errors.Is in tests).
-var _ = errors.Is
