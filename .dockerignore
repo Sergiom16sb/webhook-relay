@@ -1,0 +1,45 @@
+# Files not needed in Docker build context.
+# Speeds up build and keeps image small.
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+
+# Documentation (not needed at runtime)
+*.md
+LICENSE
+
+# Local config
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go build artifacts (built fresh in container)
+api
+api.exe
+*.test
+*.out
+
+# Project-specific: learning exercises live outside webhook-relay
+../phase-0-skeletons/
+../phase-0-5-skeletons/
+../phase-1-webhook-foundations.md
+../phase-0-5-hex-foundations.md
+../phase-0-go-foundations.md
+../go-cli-cheatsheet.md
+../plan-*.md
+../projects-summary.md

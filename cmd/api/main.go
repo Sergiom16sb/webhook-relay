@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -27,6 +28,19 @@ import (
 )
 
 func main() {
+	// --healthcheck-only exits 0 if /healthz responds 200, 1 otherwise.
+	// Used by Docker HEALTHCHECK (distroless image has no curl/wget).
+	healthcheckOnly := flag.Bool("healthcheck-only", false, "exit 0 if /healthz responds 200, 1 otherwise (Docker HEALTHCHECK)")
+	flag.Parse()
+	if *healthcheckOnly {
+		resp, err := http.Get("http://localhost:8080/healthz")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		_ = resp.Body.Close()
+		os.Exit(0)
+	}
+
 	// Structured logging to stdout in JSON format.
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
