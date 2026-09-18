@@ -63,3 +63,30 @@ func (s *EventStore) FindByID(_ context.Context, id string) (*domain.Event, erro
 	}
 	return e, nil
 }
+
+// List returns a page of events ordered by insertion (newest first in v1).
+// TODO Step 1.18: real ORDER BY created_at DESC + indexes.
+func (s *EventStore) List(_ context.Context, limit, offset int) ([]*domain.Event, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Inefficient but correct for v1: iterate map.
+	all := make([]*domain.Event, 0, len(s.byID))
+	for _, e := range s.byID {
+		all = append(all, e)
+	}
+	if offset >= len(all) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end], nil
+}
+
+// Count returns total events in the store.
+func (s *EventStore) Count(_ context.Context) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.byID), nil
+}

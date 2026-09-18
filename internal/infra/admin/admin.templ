@@ -1,0 +1,354 @@
+// Package admin renders the webhook-relay admin panel using templ.
+// Templates are compiled to Go code via `templ generate`.
+// Run: templ generate && go build ./...
+package admin
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/sgtour/webhook-relay/internal/domain"
+)
+
+// --- Shared prop types ---
+
+type EventRow struct {
+	ID        string
+	SourceID  string
+	Type      string
+	Status    string
+	CreatedAt time.Time
+}
+
+type AttemptRow struct {
+	At         time.Time
+	StatusCode int
+	Duration   string
+	Error      string
+}
+
+type FilterState struct {
+	Status string
+	Source string
+	Q      string
+}
+
+// --- Layout (shared chrome) ---
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en" data-theme="light">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title } · webhook-relay admin</title>
+			<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet"/>
+			<script src="https://cdn.tailwindcss.com"></script>
+			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
+		</head>
+		<body class="min-h-screen bg-base-200">
+			<div class="navbar bg-base-100 shadow">
+				<div class="flex-1">
+					<a href="/admin" class="btn btn-ghost text-xl">webhook-relay</a>
+					<a href="/admin/events" class="btn btn-ghost">Events</a>
+					<a href="/admin/hmac" class="btn btn-ghost">HMAC helper</a>
+				</div>
+				<div class="flex-none">
+					<span class="badge badge-ghost">v1</span>
+				</div>
+			</div>
+			<main class="container mx-auto p-6">
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+// --- Status badge (helper, used in dashboard and list) ---
+
+templ StatusBadge(status string) {
+	if status == "delivered" {
+		<span class="badge badge-success">delivered</span>
+	} else if status == "failed" {
+		<span class="badge badge-error">failed</span>
+	} else {
+		<span class="badge badge-info">pending</span>
+	}
+}
+
+// --- Dashboard ---
+
+type DashboardProps struct {
+	TotalLast24h int
+	SuccessRate  float64
+	Pending      int
+	Failed       int
+	Recent       []EventRow
+}
+
+templ Dashboard(props DashboardProps) {
+	@Layout("Dashboard") {
+		<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+			<div class="stat bg-base-100 rounded shadow">
+				<div class="stat-title">Events (24h)</div>
+				<div class="stat-value">{ fmtInt(props.TotalLast24h) }</div>
+			</div>
+			<div class="stat bg-base-100 rounded shadow">
+				<div class="stat-title">Success rate</div>
+				<div class="stat-value">{ fmt.Sprintf("%.1f", props.SuccessRate) }%</div>
+			</div>
+			<div class="stat bg-base-100 rounded shadow">
+				<div class="stat-title">Pending</div>
+				<div class="stat-value text-info">{ fmtInt(props.Pending) }</div>
+			</div>
+			<div class="stat bg-base-100 rounded shadow">
+				<div class="stat-title">Failed</div>
+				<div class="stat-value text-error">{ fmtInt(props.Failed) }</div>
+			</div>
+		</div>
+		<div class="card bg-base-100 shadow">
+			<div class="card-body">
+				<h2 class="card-title flex justify-between">
+					Recent events
+					<a href="/admin/events" class="btn btn-sm btn-ghost">view all →</a>
+				</h2>
+				if len(props.Recent) > 0 {
+					<div class="overflow-x-auto">
+						<table class="table table-sm">
+							<thead>
+								<tr>
+									<th>id</th>
+									<th>source</th>
+									<th>type</th>
+									<th>status</th>
+									<th>when</th>
+									<th></th>
+								</tr>
+							</thead>
+							<tbody>
+								for _, e := range props.Recent {
+									<tr>
+										<td><code class="text-xs">{ e.ID }</code></td>
+										<td>{ e.SourceID }</td>
+										<td>{ e.Type }</td>
+										<td>@StatusBadge(e.Status)</td>
+										<td class="text-xs">{ fmtShortTime(e.CreatedAt) }</td>
+										<td><a href={ templ.SafeURL("/admin/events/" + e.ID) } class="btn btn-xs">view</a></td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+				} else {
+					<p class="text-base-content/60">No events yet.</p>
+				}
+			</div>
+		</div>
+	}
+}
+
+// --- Events list ---
+
+type EventsListProps struct {
+	Events     []EventRow
+	Filter     FilterState
+	Page       int
+	TotalPages int
+	Total      int
+}
+
+templ EventsList(props EventsListProps) {
+	@Layout("Events") {
+		<div class="card bg-base-100 shadow">
+			<div class="card-body">
+				<h2 class="card-title">Events</h2>
+				<form
+					hx-get="/admin/events"
+					hx-trigger="change from:input, delay:200ms"
+					hx-target="#events-table-body"
+					class="flex gap-2 mb-4">
+					<select name="status" class="select select-sm select-bordered">
+						<option value="">All statuses</option>
+						<option value="pending" if props.Filter.Status == "pending" { selected }>pending</option>
+						<option value="delivered" if props.Filter.Status == "delivered" { selected }>delivered</option>
+						<option value="failed" if props.Filter.Status == "failed" { selected }>failed</option>
+					</select>
+					<input type="text" name="source" value={ props.Filter.Source } placeholder="source_id" class="input input-sm input-bordered"/>
+					<input type="text" name="q" value={ props.Filter.Q } placeholder="search by id" class="input input-sm input-bordered flex-1"/>
+				</form>
+				<div id="events-table-body">
+					if len(props.Events) > 0 {
+						<div class="overflow-x-auto">
+							<table class="table table-sm">
+								<thead>
+									<tr>
+										<th>id</th><th>source</th><th>type</th><th>status</th><th>created</th><th></th>
+									</tr>
+								</thead>
+								<tbody>
+									for _, e := range props.Events {
+										<tr>
+											<td><code class="text-xs">{ e.ID }</code></td>
+											<td>{ e.SourceID }</td>
+											<td>{ e.Type }</td>
+											<td>@StatusBadge(e.Status)</td>
+											<td class="text-xs">{ fmtTime(e.CreatedAt) }</td>
+											<td><a href={ templ.SafeURL("/admin/events/" + e.ID) } class="btn btn-xs">view</a></td>
+										</tr>
+									}
+								</tbody>
+							</table>
+						</div>
+						<div class="flex justify-between items-center mt-4">
+							<span class="text-sm">Page { fmtInt(props.Page) } of { fmtInt(props.TotalPages) } · { fmtInt(props.Total) } events</span>
+							<div class="join">
+								if props.Page > 1 {
+									<a class="join-item btn btn-sm" href={ buildPageURL(props.Filter, props.Page-1) }>←</a>
+								}
+								if props.Page < props.TotalPages {
+									<a class="join-item btn btn-sm" href={ buildPageURL(props.Filter, props.Page+1) }>→</a>
+								}
+							</div>
+						</div>
+					} else {
+						<p class="text-base-content/60 text-center py-8">No events match the current filters.</p>
+					}
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// --- Event detail ---
+
+type EventDetailProps struct {
+	Event    *domain.Event
+	Attempts []AttemptRow
+}
+
+templ EventDetail(props EventDetailProps) {
+	@Layout("Event " + props.Event.ID) {
+		<div class="mb-4">
+			<a href="/admin/events" class="btn btn-sm btn-ghost">← events</a>
+		</div>
+		<div class="card bg-base-100 shadow mb-4">
+			<div class="card-body">
+				<div class="flex justify-between items-start">
+					<div>
+						<h2 class="card-title font-mono text-lg">{ props.Event.ID }</h2>
+						<div class="text-sm text-base-content/70 mt-1">
+							source: <code>{ props.Event.SourceID }</code>
+							· type: <code>{ props.Event.Type }</code>
+						</div>
+						<div class="text-xs text-base-content/50 mt-1">
+							payload_hash: <code>{ truncHash(props.Event.PayloadHash) }</code>
+							· created: { fmtLongTime(props.Event.CreatedAt) }
+						</div>
+					</div>
+					if props.Event.Status == "failed" {
+						<button
+							hx-post={ templ.SafeURL("/admin/events/" + props.Event.ID + "/retry") }
+							hx-swap="none"
+							hx-on::after-request="location.reload()"
+							class="btn btn-warning btn-sm">
+							↻ Retry
+						</button>
+					}
+				</div>
+			</div>
+		</div>
+		<div class="card bg-base-100 shadow mb-4">
+			<div class="card-body">
+				<h3 class="font-bold">Payload</h3>
+				<pre class="bg-base-200 p-3 rounded text-xs overflow-x-auto"><code>{ string(props.Event.Payload) }</code></pre>
+			</div>
+		</div>
+		<div class="card bg-base-100 shadow">
+			<div class="card-body">
+				<h3 class="font-bold">Delivery attempts</h3>
+				if len(props.Attempts) > 0 {
+					<table class="table table-sm">
+						<thead>
+							<tr><th>when</th><th>code</th><th>duration</th><th>result</th></tr>
+						</thead>
+						<tbody>
+							for _, a := range props.Attempts {
+								<tr>
+									<td class="text-xs">{ fmtTime(a.At) }</td>
+									<td>
+										if a.StatusCode > 0 {
+											{ fmtInt(a.StatusCode) }
+										} else {
+											<span class="text-base-content/40">—</span>
+										}
+									</td>
+									<td>{ a.Duration }</td>
+									<td>
+										if a.Error != "" {
+											<code class="text-xs text-error">{ a.Error }</code>
+										} else {
+											<span class="badge badge-success">ok</span>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				} else {
+					<p class="text-base-content/60">No attempts yet (status: { props.Event.Status }).</p>
+				}
+			</div>
+		</div>
+	}
+}
+
+// --- HMAC helper ---
+
+type HMACHelperProps struct {
+	Secret    string
+	Payload   string
+	Signature string
+}
+
+templ HMACHelper(props HMACHelperProps) {
+	@Layout("HMAC helper") {
+		<div class="card bg-base-100 shadow max-w-2xl mx-auto">
+			<div class="card-body">
+				<h2 class="card-title">HMAC signature generator</h2>
+				<p class="text-sm text-base-content/70 mb-4">
+					Computes HMAC-SHA256 over a payload with the given secret. Use the
+					result in <code>X-Webhook-Signature</code> header.
+				</p>
+				<form hx-post="/admin/hmac" hx-target="#hmac-result" hx-swap="innerHTML" class="space-y-3">
+					<label class="form-control">
+						<span class="label-text">Secret</span>
+						<input type="text" name="secret" value={ props.Secret } required class="input input-bordered w-full"/>
+					</label>
+					<label class="form-control">
+						<span class="label-text">Payload</span>
+						<textarea name="payload" rows="5" required class="textarea textarea-bordered w-full font-mono text-xs">{ props.Payload }</textarea>
+					</label>
+					<button type="submit" class="btn btn-primary">Compute</button>
+				</form>
+				<div id="hmac-result" class="mt-6">
+					if props.Signature != "" {
+						<div class="alert alert-success">
+							<div>
+								<div class="font-bold">Signature</div>
+								<code class="text-xs break-all">{ props.Signature }</code>
+							</div>
+						</div>
+						<div class="mt-2 text-sm">
+							<code class="text-xs">curl -X POST http://localhost:8080/events \
+<br>&nbsp;&nbsp;-H "X-Webhook-Signature: { props.Signature }" \
+<br>&nbsp;&nbsp;-H "Content-Type: application/json" \
+<br>&nbsp;&nbsp;-d '&lt;your payload here&gt;'</code>
+						</div>
+					} else {
+						<p class="text-base-content/60 text-sm">Submit the form to compute.</p>
+					}
+				</div>
+			</div>
+		</div>
+	}
+}

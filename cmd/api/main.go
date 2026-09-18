@@ -20,6 +20,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/sgtour/webhook-relay/internal/application"
+	"github.com/sgtour/webhook-relay/internal/infra/admin"
 	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
 	"github.com/sgtour/webhook-relay/internal/infra/memory"
 	pgadapter "github.com/sgtour/webhook-relay/internal/infra/postgres"
@@ -85,12 +86,31 @@ func main() {
 	// Wire use cases to handlers.
 	handlers := infrahttp.NewEventHandlers(receiveEvent, verifier)
 
+	// Wire admin panel.
+	secret := os.Getenv("WEBHOOK_SECRET")
+	var verifier2 application.SignatureVerifier
+	if secret != "" {
+		v, err := webhook.NewHMACVerifier(secret)
+		if err == nil {
+			verifier2 = v
+		}
+	}
+	adminHandlers := admin.NewHandlers(store, verifier2, secret)
+
 	// Mux with method-aware routing (Go 1.22+).
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("hello"))
 	})
 	mux.HandleFunc("POST /events", handlers.PostEvent)
+
+	// Admin panel.
+	mux.HandleFunc("GET /admin", adminHandlers.Dashboard)
+	mux.HandleFunc("GET /admin/events", adminHandlers.EventsList)
+	mux.HandleFunc("GET /admin/events/{id}", adminHandlers.EventDetail)
+	mux.HandleFunc("POST /admin/events/{id}/retry", adminHandlers.RetryEvent)
+	mux.HandleFunc("GET /admin/hmac", adminHandlers.HMACForm)
+	mux.HandleFunc("POST /admin/hmac", adminHandlers.HMACCompute)
 
 	// Wrap mux with middleware. Order: RequestID runs FIRST so Logger
 	// can include the ID in every log line.

@@ -92,6 +92,35 @@ func (s *EventStore) Save(ctx context.Context, e *domain.Event) (*domain.Event, 
 	return row.toDomain(), nil
 }
 
+// List returns a page of events ordered by created_at DESC.
+func (s *EventStore) List(ctx context.Context, limit, offset int) ([]*domain.Event, error) {
+	const q = `SELECT id, source_id, type, payload, status, created_at, payload_hash
+	          FROM events ORDER BY created_at DESC LIMIT $1 OFFSET $2`
+	rows, err := s.db.QueryxContext(ctx, q, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*domain.Event
+	for rows.Next() {
+		var r eventRow
+		if err := rows.StructScan(&r); err != nil {
+			return nil, err
+		}
+		out = append(out, r.toDomain())
+	}
+	return out, rows.Err()
+}
+
+// Count returns total events.
+func (s *EventStore) Count(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.GetContext(ctx, &n, "SELECT COUNT(*) FROM events"); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // FindByID returns the event for the given ID, or ErrEventNotFound.
 func (s *EventStore) FindByID(ctx context.Context, id string) (*domain.Event, error) {
 	const q = `SELECT id, source_id, type, payload, status, created_at, payload_hash FROM events WHERE id = $1`
