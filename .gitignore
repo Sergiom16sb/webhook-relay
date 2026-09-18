@@ -1,0 +1,25 @@
+# Binaries
+/api
+/api.exe
+/cmd/api/api
+/cmd/api/api.exe
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+
+# Local config
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project: learning modules and docs live OUTSIDE this repo
