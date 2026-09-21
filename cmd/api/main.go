@@ -176,8 +176,9 @@ func buildStore(ctx context.Context) *closableStore {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		slog.Info("DATABASE_URL not set, using in-memory store")
+		store := memory.NewMemoryEventStore()
 		return &closableStore{
-			EventStore: memory.NewEventStore(),
+			EventStore: store,
 			closeFn:    nil,
 		}
 	}

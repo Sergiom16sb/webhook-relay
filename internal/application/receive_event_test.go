@@ -123,7 +123,7 @@ func TestReceiveEvent(t *testing.T) {
 // TestReceiveEvent_Idempotency — same payload twice returns same event ID.
 // Uses memory store directly to verify the (source_id, payload_hash) dedup.
 func TestReceiveEvent_Idempotency(t *testing.T) {
-	store := memory.NewEventStore()
+	store := memory.NewMemoryEventStore()
 	uc := application.NewReceiveEventUseCase(store)
 
 	payload := json.RawMessage(`{"order_id":"ord_42","amount":99}`)

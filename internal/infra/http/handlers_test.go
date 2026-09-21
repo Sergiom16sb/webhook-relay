@@ -17,9 +17,9 @@ const testSecret = "test-secret-key-do-not-use-in-prod"
 
 // newTestServer wires real adapters (no mocks for handler tests).
 // The handler is the integration point — wiring matters.
-func newTestServer(t *testing.T) (*httptest.Server, *memory.EventStore, *webhook.HMACVerifier) {
+func newTestServer(t *testing.T) (*httptest.Server, *memory.MemoryEventStore, *webhook.HMACVerifier) {
 	t.Helper()
-	store := memory.NewEventStore()
+	store := memory.NewMemoryEventStore()
 	uc := application.NewReceiveEventUseCase(store)
 	verifier, err := webhook.NewHMACVerifier(testSecret)
 	if err != nil {
@@ -33,9 +33,9 @@ func newTestServer(t *testing.T) (*httptest.Server, *memory.EventStore, *webhook
 
 // newUnverifiedTestServer builds a server with signature verification
 // disabled (verifier=nil). Used for tests that don't care about auth.
-func newUnverifiedTestServer(t *testing.T) (*httptest.Server, *memory.EventStore) {
+func newUnverifiedTestServer(t *testing.T) (*httptest.Server, *memory.MemoryEventStore) {
 	t.Helper()
-	store := memory.NewEventStore()
+	store := memory.NewMemoryEventStore()
 	uc := application.NewReceiveEventUseCase(store)
 	h := infrahttp.NewEventHandlers(uc, nil)
 	mux := http.NewServeMux()
