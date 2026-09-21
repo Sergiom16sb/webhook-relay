@@ -72,7 +72,7 @@ func TestEventStore(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			store := memory.NewEventStore()
+			store := memory.NewMemoryEventStore()
 			ctx := context.Background()
 
 			for _, e := range tt.seed {

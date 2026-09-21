@@ -30,6 +30,36 @@ type EventStore interface {
 	Count(ctx context.Context) (int, error)
 }
 
+// SubscriptionStore manages delivery subscriptions.
+// Adapters in internal/infra/ implement this interface.
+type SubscriptionStore interface {
+	// Save persists a subscription. Returns the persisted subscription
+	// (whether newly created or pre-existing).
+	Save(ctx context.Context, s *domain.Subscription) (*domain.Subscription, error)
+
+	// FindByID returns the subscription for the given ID.
+	FindByID(ctx context.Context, id string) (*domain.Subscription, error)
+
+	// ListBySourceID returns all active subscriptions for a given source.
+	// Used by the delivery use case to fan out an event to subscribers.
+	ListBySourceID(ctx context.Context, sourceID string) ([]*domain.Subscription, error)
+
+	// List returns a page of subscriptions (admin UI).
+	List(ctx context.Context, limit, offset int) ([]*domain.Subscription, error)
+
+	// Count returns total subscriptions.
+	Count(ctx context.Context) (int, error)
+}
+
+// DeliveryAttemptStore records each attempt to deliver an event.
+type DeliveryAttemptStore interface {
+	// Save persists a delivery attempt.
+	Save(ctx context.Context, a *domain.DeliveryAttempt) (*domain.DeliveryAttempt, error)
+
+	// ListByEventID returns all attempts for an event, ordered by attempt_num.
+	ListByEventID(ctx context.Context, eventID string) ([]*domain.DeliveryAttempt, error)
+}
+
 // SignatureVerifier verifies a signature over a payload using a secret.
 // The adapter (HMAC, RSA, etc.) is chosen in infra; the use case only
 // sees this interface and doesn't care about the algorithm.
