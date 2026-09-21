@@ -5,7 +5,17 @@
 # ---------- Build stage ----------
 FROM golang:1.27-alpine AS build
 
+# git is needed if any module isn't on proxy.golang.org.
+RUN apk add --no-cache git ca-certificates && update-ca-certificates
+
 WORKDIR /src
+
+# Some Docker build environments resolve DNS over IPv6 first and hang
+# if there's no IPv6 route (proxy.golang.org fails). Use the proxy for
+# all modules; if a module is missing it falls back to direct with git.
+ENV GOFLAGS="-mod=mod"
+ENV GOPROXY=https://proxy.golang.org,direct
+ENV GOSUMDB=sum.golang.org
 
 # Cache go.mod/go.sum download as a separate layer.
 COPY go.mod go.sum ./
