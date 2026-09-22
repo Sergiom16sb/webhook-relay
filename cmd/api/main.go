@@ -95,7 +95,14 @@ func main() {
 			verifier2 = v
 		}
 	}
-	adminHandlers := admin.NewHandlers(store, verifier2, secret)
+
+	// Wire subscription stores and use cases. Uses same backend as event store.
+	_ = store // silence unused if compiler complains
+	subStore := buildSubStore(nil)
+	createSub := application.NewCreateSubscriptionUseCase(subStore)
+	deleteSub := application.NewDeleteSubscriptionUseCase(subStore)
+
+	adminHandlers := admin.NewHandlers(store, subStore, createSub, deleteSub, verifier2, secret)
 
 	// Mux with method-aware routing (Go 1.22+).
 	mux := http.NewServeMux()
@@ -111,6 +118,9 @@ func main() {
 	mux.HandleFunc("POST /admin/events/{id}/retry", adminHandlers.RetryEvent)
 	mux.HandleFunc("GET /admin/hmac", adminHandlers.HMACForm)
 	mux.HandleFunc("POST /admin/hmac", adminHandlers.HMACCompute)
+	mux.HandleFunc("GET /admin/subscriptions", adminHandlers.SubscriptionsList)
+	mux.HandleFunc("POST /admin/subscriptions", adminHandlers.SubscriptionCreate)
+	mux.HandleFunc("POST /admin/subscriptions/{id}/delete", adminHandlers.SubscriptionDelete)
 
 	// Wrap mux with middleware. Order: RequestID runs FIRST so Logger
 	// can include the ID in every log line.
@@ -170,6 +180,10 @@ func (c *closableStore) Close() error {
 	return nil
 }
 
+// sharedDB holds the *sqlx.DB across both stores so we don't open two
+// connections to the same postgres.
+var sharedDB *sqlx.DB
+
 // buildStore returns a closableStore based on DATABASE_URL.
 // In-memory adapter is used when DATABASE_URL is empty (dev, tests).
 func buildStore(ctx context.Context) *closableStore {
@@ -177,6 +191,7 @@ func buildStore(ctx context.Context) *closableStore {
 	if dsn == "" {
 		slog.Info("DATABASE_URL not set, using in-memory store")
 		store := memory.NewMemoryEventStore()
+		sharedDB = nil
 		return &closableStore{
 			EventStore: store,
 			closeFn:    nil,
@@ -203,8 +218,19 @@ func buildStore(ctx context.Context) *closableStore {
 	}
 
 	slog.Info("postgres ready, migrations applied")
+	sharedDB = db
 	return &closableStore{
 		EventStore: pgadapter.NewEventStore(db),
 		closeFn:    db.Close,
 	}
+}
+
+// buildSubStore returns the subscription store matching the event store's backend.
+func buildSubStore(_ interface{ EventStore() }) application.SubscriptionStore {
+	// We use the sharedDB package-level var (set in buildStore) instead of
+	// threading it through every return type.
+	if sharedDB == nil {
+		return memory.NewMemorySubscriptionStore()
+	}
+	return pgadapter.NewSubscriptionStore(sharedDB)
 }
