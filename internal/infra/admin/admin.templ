@@ -310,6 +310,22 @@ type HMACHelperProps struct {
 	Signature string
 }
 
+// --- Subscription templates (v2) ---
+
+type SubscriptionRow struct {
+	ID        string
+	SourceID  string
+	TargetURL string
+	Status    string
+	CreatedAt string
+}
+
+type SubscriptionsListProps struct {
+	Rows   []SubscriptionRow
+	Total  int
+	Secret string
+}
+
 templ HMACHelper(props HMACHelperProps) {
 	@Layout("HMAC helper") {
 		<div class="card bg-base-100 shadow max-w-2xl mx-auto">
@@ -348,6 +364,78 @@ templ HMACHelper(props HMACHelperProps) {
 						<p class="text-base-content/60 text-sm">Submit the form to compute.</p>
 					}
 				</div>
+			</div>
+		</div>
+	}
+}
+
+// SubscriptionsList renders the subscriptions admin page.
+// Shows the create form at top + table of existing subscriptions below.
+templ SubscriptionsList(props SubscriptionsListProps) {
+	@Layout("Subscriptions") {
+		<div class="card bg-base-100 shadow mb-4">
+			<div class="card-body">
+				<h2 class="card-title">New subscription</h2>
+				<form hx-post="/admin/subscriptions" hx-target="body" class="space-y-3">
+					<label class="form-control">
+						<span class="label-text">Source ID</span>
+						<input type="text" name="source_id" placeholder="shopify" required class="input input-bordered w-full"/>
+					</label>
+					<label class="form-control">
+						<span class="label-text">Target URL</span>
+						<input type="url" name="target_url" placeholder="https://example.com/webhook" required class="input input-bordered w-full"/>
+					</label>
+					<label class="form-control">
+						<span class="label-text">Secret (HMAC-SHA256)</span>
+						<input type="text" name="secret" value={ props.Secret } required class="input input-bordered w-full"/>
+					</label>
+					<button type="submit" class="btn btn-primary">Create</button>
+				</form>
+			</div>
+		</div>
+
+		<div class="card bg-base-100 shadow">
+			<div class="card-body">
+				<h2 class="card-title">Active subscriptions ({ fmtInt(props.Total) })</h2>
+				if len(props.Rows) > 0 {
+					<div class="overflow-x-auto">
+						<table class="table table-sm">
+							<thead>
+								<tr>
+									<th>id</th><th>source</th><th>target</th><th>status</th><th>created</th><th></th>
+								</tr>
+							</thead>
+							<tbody>
+								for _, s := range props.Rows {
+									<tr>
+										<td><code class="text-xs">{ s.ID }</code></td>
+										<td>{ s.SourceID }</td>
+										<td class="text-xs break-all">{ s.TargetURL }</td>
+										<td>
+											if s.Status == "deleted" {
+												<span class="badge badge-error">deleted</span>
+											} else {
+												<span class="badge badge-success">{ s.Status }</span>
+											}
+										</td>
+										<td class="text-xs">{ s.CreatedAt }</td>
+										<td>
+											<button
+												hx-post={ templ.SafeURL("/admin/subscriptions/" + s.ID + "/delete") }
+												hx-confirm={ "Delete subscription " + s.ID + "?" }
+												hx-target="body"
+												class="btn btn-xs btn-error">
+												Delete
+											</button>
+										</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+				} else {
+					<p class="text-base-content/60">No subscriptions yet.</p>
+				}
 			</div>
 		</div>
 	}

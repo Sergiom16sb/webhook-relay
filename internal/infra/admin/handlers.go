@@ -22,14 +22,31 @@ import (
 
 // Handlers wires the admin routes to templ components.
 type Handlers struct {
-	store    application.EventStore
-	verifier application.SignatureVerifier // for HMAC helper default secret
-	secret   string                        // default secret for HMAC form
+	store             application.EventStore
+	subscriptionStore application.SubscriptionStore
+	createSub         *application.CreateSubscriptionUseCase
+	deleteSub         *application.DeleteSubscriptionUseCase
+	verifier          application.SignatureVerifier // for HMAC helper default secret
+	secret            string                        // default secret for HMAC form
 }
 
 // NewHandlers constructs the admin handlers.
-func NewHandlers(store application.EventStore, verifier application.SignatureVerifier, secret string) *Handlers {
-	return &Handlers{store: store, verifier: verifier, secret: secret}
+func NewHandlers(
+	store application.EventStore,
+	subscriptionStore application.SubscriptionStore,
+	createSub *application.CreateSubscriptionUseCase,
+	deleteSub *application.DeleteSubscriptionUseCase,
+	verifier application.SignatureVerifier,
+	secret string,
+) *Handlers {
+	return &Handlers{
+		store:             store,
+		subscriptionStore: subscriptionStore,
+		createSub:         createSub,
+		deleteSub:         deleteSub,
+		verifier:          verifier,
+		secret:            secret,
+	}
 }
 
 // Dashboard handles GET /admin.
@@ -318,3 +335,92 @@ func toRows(es []*domain.Event) []EventRow {
 
 // silence unused imports if shrinking
 var _ = time.Second
+
+// --- Subscription handlers (v2) ---
+
+// SubscriptionsList handles GET /admin/subscriptions.
+// Lists all subscriptions + shows the create form.
+func (h *Handlers) SubscriptionsList(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	const pageSize = 50
+	rows, err := h.subscriptionStore.List(ctx, pageSize, 0)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	total, _ := h.subscriptionStore.Count(ctx)
+
+	props := SubscriptionsListProps{
+		Rows:   subRowsFromDomain(rows),
+		Total:  total,
+		Secret: h.secret,
+	}
+	render(w, r, SubscriptionsList(props))
+}
+
+// SubscriptionCreate handles POST /admin/subscriptions.
+// Parses form, calls CreateSubscription use case, redirects to list.
+func (h *Handlers) SubscriptionCreate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	sourceID := strings.TrimSpace(r.FormValue("source_id"))
+	targetURL := strings.TrimSpace(r.FormValue("target_url"))
+	secret := strings.TrimSpace(r.FormValue("secret"))
+
+	if sourceID == "" || targetURL == "" || secret == "" {
+		http.Error(w, "source_id, target_url, and secret are required", http.StatusBadRequest)
+		return
+	}
+
+	sub, err := h.createSub.Create(r.Context(), sourceID, targetURL, secret)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Redirect back to list with the new sub highlighted.
+	http.Redirect(w, r, "/admin/subscriptions?highlight="+sub.ID, http.StatusSeeOther)
+}
+
+// SubscriptionDelete handles POST /admin/subscriptions/{id}/delete.
+func (h *Handlers) SubscriptionDelete(w http.ResponseWriter, r *http.Request) {
+	id := extractSubscriptionID(r.URL.Path, "/admin/subscriptions/", "/delete")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if err := h.deleteSub.Delete(r.Context(), id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin/subscriptions", http.StatusSeeOther)
+}
+
+// extractSubscriptionID parses the id from /admin/subscriptions/{id}[/delete].
+func extractSubscriptionID(path, prefix, suffix string) string {
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	if i := strings.Index(rest, suffix); i >= 0 {
+		return rest[:i]
+	}
+	return rest
+}
+
+// subRowsFromDomain converts domain subscriptions to admin template rows.
+func subRowsFromDomain(subs []*domain.Subscription) []SubscriptionRow {
+	out := make([]SubscriptionRow, len(subs))
+	for i, s := range subs {
+		out[i] = SubscriptionRow{
+			ID:        s.ID,
+			SourceID:  s.SourceID,
+			TargetURL: s.TargetURL,
+			Status:    string(s.Status),
+			CreatedAt: s.CreatedAt.Format("2006-01-02 15:04:05 MST"),
+		}
+	}
+	return out
+}

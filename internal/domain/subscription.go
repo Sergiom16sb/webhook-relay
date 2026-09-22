@@ -22,9 +22,9 @@ const (
 // at the application layer.
 type Subscription struct {
 	ID        string
-	SourceID  string            // matches Event.SourceID for routing
-	TargetURL string            // where the event is POSTed
-	Secret    string            // HMAC secret for signing the delivery
+	SourceID  string // matches Event.SourceID for routing
+	TargetURL string // where the event is POSTed
+	Secret    string // HMAC secret for signing the delivery
 	Status    SubscriptionStatus
 	CreatedAt time.Time
 }
