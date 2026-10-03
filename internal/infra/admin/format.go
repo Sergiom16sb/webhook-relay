@@ -29,6 +29,19 @@ func fmtTime(t time.Time) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
+// fmtDuration formats the elapsed time between start and end for the
+// delivery-attempts table. nil end → "—" (in-flight attempt).
+func fmtDuration(start time.Time, end *time.Time) string {
+	if end == nil {
+		return "—"
+	}
+	d := end.Sub(start)
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
 // fmtLongTime formats a time as "YYYY-MM-DD HH:MM:SS MST".
 func fmtLongTime(t time.Time) string {
 	return t.Format("2006-01-02 15:04:05 MST")

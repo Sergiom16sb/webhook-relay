@@ -87,7 +87,7 @@ func main() {
 	// wiring can reference it (delivery executor, enqueue, admin).
 	_ = store // silence unused if compiler complains
 	subStore := buildSubStore(nil)
-	attemptStore := memory.NewMemoryDeliveryAttemptStore()
+	attemptStore := buildAttemptStore()
 
 	// Wire use cases to handlers.
 	// Delivery executor + enqueue for v2 (Step 1.12+).
@@ -117,7 +117,7 @@ func main() {
 	createSub := application.NewCreateSubscriptionUseCase(subStore)
 	deleteSub := application.NewDeleteSubscriptionUseCase(subStore)
 
-	adminHandlers := admin.NewHandlers(store, subStore, createSub, deleteSub, verifier2, secret)
+	adminHandlers := admin.NewHandlers(store, subStore, attemptStore, createSub, deleteSub, verifier2, secret)
 
 	// Mux with method-aware routing (Go 1.22+).
 	mux := http.NewServeMux()
@@ -248,4 +248,17 @@ func buildSubStore(_ interface{ EventStore() }) application.SubscriptionStore {
 		return memory.NewMemorySubscriptionStore()
 	}
 	return pgadapter.NewSubscriptionStore(sharedDB)
+}
+
+// buildAttemptStore returns the delivery attempt store matching the
+// event store's backend. Mirrors buildSubStore: postgres if DATABASE_URL
+// is set, in-memory otherwise. Previously the attempt store was
+// hardcoded to memory, so in production attempts vanished on restart
+// and the dashboard (once wired) would show no attempts for events that
+// had been delivered.
+func buildAttemptStore() application.DeliveryAttemptStore {
+	if sharedDB == nil {
+		return memory.NewMemoryDeliveryAttemptStore()
+	}
+	return pgadapter.NewDeliveryAttemptStore(sharedDB)
 }

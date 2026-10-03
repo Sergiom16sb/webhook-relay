@@ -88,10 +88,12 @@ func (s *DeliveryAttemptStore) Save(ctx context.Context, a *domain.DeliveryAttem
 
 // ListByEventID returns all attempts for an event. With the state-machine
 // design there's at most one row per (event, subscription), so the result
-// has at most len(subscriptions) rows.
+// has at most len(subscriptions) rows. Ordered by started_at DESC so the
+// admin UI shows the most recent attempt first.
 func (s *DeliveryAttemptStore) ListByEventID(ctx context.Context, eventID string) ([]*domain.DeliveryAttempt, error) {
 	const q = `SELECT id, event_id, subscription_id, attempt_num, attempt_count, status, status_code, error, started_at, completed_at
-	          FROM delivery_attempts WHERE event_id = $1`
+	          FROM delivery_attempts WHERE event_id = $1
+	          ORDER BY started_at DESC`
 	rows, err := s.db.QueryxContext(ctx, q, eventID)
 	if err != nil {
 		return nil, err
