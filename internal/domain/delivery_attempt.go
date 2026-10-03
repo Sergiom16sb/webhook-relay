@@ -14,7 +14,8 @@ const (
 
 // DeliveryAttempt records the delivery state of an event to a subscription.
 // One row per (event, subscription). Status transitions:
-//   pending → success | failed | retrying
+//
+//	pending → success | failed | retrying
 //
 // Append-only retry history is intentionally NOT modeled here — see
 // internal/domain/attempt_id.go for the single-row state machine rationale.

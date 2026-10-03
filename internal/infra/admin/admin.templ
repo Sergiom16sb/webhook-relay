@@ -22,6 +22,7 @@ type EventRow struct {
 
 type AttemptRow struct {
 	At         time.Time
+	TargetURL  string
 	StatusCode int
 	Duration   string
 	Error      string
@@ -269,11 +270,12 @@ templ EventDetail(props EventDetailProps) {
 				if len(props.Attempts) > 0 {
 					<table class="table table-sm">
 						<thead>
-							<tr><th>when</th><th>code</th><th>duration</th><th>result</th></tr>
+							<tr><th>target</th><th>when</th><th>code</th><th>duration</th><th>result</th></tr>
 						</thead>
 						<tbody>
 							for _, a := range props.Attempts {
 								<tr>
+									<td class="text-xs break-all">{ a.TargetURL }</td>
 									<td class="text-xs">{ fmtTime(a.At) }</td>
 									<td>
 										if a.StatusCode > 0 {

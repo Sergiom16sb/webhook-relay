@@ -24,6 +24,7 @@ import (
 type Handlers struct {
 	store             application.EventStore
 	subscriptionStore application.SubscriptionStore
+	attemptStore      application.DeliveryAttemptStore
 	createSub         *application.CreateSubscriptionUseCase
 	deleteSub         *application.DeleteSubscriptionUseCase
 	verifier          application.SignatureVerifier // for HMAC helper default secret
@@ -34,6 +35,7 @@ type Handlers struct {
 func NewHandlers(
 	store application.EventStore,
 	subscriptionStore application.SubscriptionStore,
+	attemptStore application.DeliveryAttemptStore,
 	createSub *application.CreateSubscriptionUseCase,
 	deleteSub *application.DeleteSubscriptionUseCase,
 	verifier application.SignatureVerifier,
@@ -42,6 +44,7 @@ func NewHandlers(
 	return &Handlers{
 		store:             store,
 		subscriptionStore: subscriptionStore,
+		attemptStore:      attemptStore,
 		createSub:         createSub,
 		deleteSub:         deleteSub,
 		verifier:          verifier,
@@ -125,9 +128,39 @@ func (h *Handlers) EventDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	attempts, err := h.attemptStore.ListByEventID(ctx, event.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Pre-load all subscriptions once to build a TargetURL lookup table.
+	// With small N (typically <20 subs) this is cheaper than per-attempt
+	// FindByID calls and naturally handles deleted subs.
+	subs, _ := h.subscriptionStore.List(ctx, 1000, 0)
+	subByID := make(map[string]*domain.Subscription, len(subs))
+	for _, s := range subs {
+		subByID[s.ID] = s
+	}
+
+	rows := make([]AttemptRow, 0, len(attempts))
+	for _, a := range attempts {
+		var target string
+		if sub, ok := subByID[a.SubscriptionID]; ok {
+			target = sub.TargetURL
+		}
+		rows = append(rows, AttemptRow{
+			At:         a.StartedAt,
+			TargetURL:  target,
+			StatusCode: a.StatusCode,
+			Duration:   fmtDuration(a.StartedAt, a.CompletedAt),
+			Error:      a.Error,
+		})
+	}
+
 	props := EventDetailProps{
 		Event:    event,
-		Attempts: nil, // TODO Step 1.18: load from delivery_attempts table
+		Attempts: rows,
 	}
 	render(w, r, EventDetail(props))
 }

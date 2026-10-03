@@ -4,6 +4,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/sgtour/webhook-relay/internal/application"
@@ -134,5 +135,10 @@ func (s *MemoryDeliveryAttemptStore) ListByEventID(_ context.Context, eventID st
 	for _, a := range s.attempts[eventID] {
 		out = append(out, a)
 	}
+	// Order by started_at DESC so the admin UI matches the postgres
+	// adapter's behavior. Map iteration order is randomized.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].StartedAt.After(out[j].StartedAt)
+	})
 	return out, nil
 }
