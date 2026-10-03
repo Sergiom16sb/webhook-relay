@@ -83,8 +83,26 @@ func main() {
 		slog.Warn("WEBHOOK_SECRET not set — signature verification DISABLED (dev mode only)")
 	}
 
+	// Wire v2 stores and use cases. subStore is declared first so other
+	// wiring can reference it (delivery executor, enqueue, admin).
+	_ = store // silence unused if compiler complains
+	subStore := buildSubStore(nil)
+	attemptStore := memory.NewMemoryDeliveryAttemptStore()
+
 	// Wire use cases to handlers.
-	handlers := infrahttp.NewEventHandlers(receiveEvent, verifier)
+	// Delivery executor + enqueue for v2 (Step 1.12+).
+	deliveryUC := application.NewDeliverEventUseCase(
+		infrahttp.NewPoster(30*time.Second),
+		application.DefaultRetryPolicy(),
+	)
+	deliveryExec := worker.NewDeliveryExecutor(deliveryUC, store, subStore, attemptStore)
+	enqueueDeliverUC := application.NewEnqueueDeliveriesUseCase(
+		store, subStore,
+		attemptStore,
+		pool,
+		deliveryExec,
+	)
+	handlers := infrahttp.NewEventHandlers(receiveEvent, enqueueDeliverUC, verifier)
 
 	// Wire admin panel.
 	secret := os.Getenv("WEBHOOK_SECRET")
@@ -96,9 +114,6 @@ func main() {
 		}
 	}
 
-	// Wire subscription stores and use cases. Uses same backend as event store.
-	_ = store // silence unused if compiler complains
-	subStore := buildSubStore(nil)
 	createSub := application.NewCreateSubscriptionUseCase(subStore)
 	deleteSub := application.NewDeleteSubscriptionUseCase(subStore)
 

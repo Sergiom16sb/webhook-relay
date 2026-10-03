@@ -28,6 +28,7 @@ type deliveryAttemptRow struct {
 	EventID        string     `db:"event_id"`
 	SubscriptionID string     `db:"subscription_id"`
 	AttemptNum     int        `db:"attempt_num"`
+	AttemptCount   int        `db:"attempt_count"`
 	Status         string     `db:"status"`
 	StatusCode     int        `db:"status_code"`
 	Error          string     `db:"error"`
@@ -41,6 +42,7 @@ func (r *deliveryAttemptRow) toDomain() *domain.DeliveryAttempt {
 		EventID:        r.EventID,
 		SubscriptionID: r.SubscriptionID,
 		AttemptNum:     r.AttemptNum,
+		AttemptCount:   r.AttemptCount,
 		Status:         domain.DeliveryAttemptStatus(r.Status),
 		StatusCode:     r.StatusCode,
 		Error:          r.Error,
@@ -49,17 +51,22 @@ func (r *deliveryAttemptRow) toDomain() *domain.DeliveryAttempt {
 	}
 }
 
-// Save persists a delivery attempt.
+// Save upserts the attempt row for (event_id, subscription_id). The
+// state-machine design guarantees one row per pair — status transitions
+// (pending → success | failed | retrying) overwrite the same row.
 func (s *DeliveryAttemptStore) Save(ctx context.Context, a *domain.DeliveryAttempt) (*domain.DeliveryAttempt, error) {
 	const q = `
 		INSERT INTO delivery_attempts
-		    (id, event_id, subscription_id, attempt_num, status, status_code, error, started_at, completed_at)
+		    (id, event_id, subscription_id, attempt_num, attempt_count, status, status_code, error, started_at, completed_at)
 		VALUES
-		    (:id, :event_id, :subscription_id, :attempt_num, :status, :status_code, :error, :started_at, :completed_at)
-		ON CONFLICT (event_id, subscription_id, attempt_num) DO UPDATE SET
+		    (:id, :event_id, :subscription_id, :attempt_num, :attempt_count, :status, :status_code, :error, :started_at, :completed_at)
+		ON CONFLICT (event_id, subscription_id) DO UPDATE SET
+		    attempt_num = EXCLUDED.attempt_num,
+		    attempt_count = EXCLUDED.attempt_count,
 		    status = EXCLUDED.status,
 		    status_code = EXCLUDED.status_code,
 		    error = EXCLUDED.error,
+		    started_at = EXCLUDED.started_at,
 		    completed_at = EXCLUDED.completed_at
 		RETURNING *
 	`
@@ -79,10 +86,12 @@ func (s *DeliveryAttemptStore) Save(ctx context.Context, a *domain.DeliveryAttem
 	return r.toDomain(), nil
 }
 
-// ListByEventID returns all attempts for an event, ordered by attempt_num.
+// ListByEventID returns all attempts for an event. With the state-machine
+// design there's at most one row per (event, subscription), so the result
+// has at most len(subscriptions) rows.
 func (s *DeliveryAttemptStore) ListByEventID(ctx context.Context, eventID string) ([]*domain.DeliveryAttempt, error) {
-	const q = `SELECT id, event_id, subscription_id, attempt_num, status, status_code, error, started_at, completed_at
-	          FROM delivery_attempts WHERE event_id = $1 ORDER BY attempt_num ASC`
+	const q = `SELECT id, event_id, subscription_id, attempt_num, attempt_count, status, status_code, error, started_at, completed_at
+	          FROM delivery_attempts WHERE event_id = $1`
 	rows, err := s.db.QueryxContext(ctx, q, eventID)
 	if err != nil {
 		return nil, err

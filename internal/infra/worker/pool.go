@@ -20,7 +20,10 @@ import (
 
 // Job is a unit of work. The function MUST respect ctx cancellation:
 // return early when ctx.Done() is signaled.
-type Job func(ctx context.Context) error
+//
+// Alias (not new type) so external packages can declare compatible
+// interfaces without type-mismatch errors.
+type Job = func(ctx context.Context) error
 
 // Pool is a fixed-size worker pool. Submit jobs, then Close to drain.
 type Pool struct {
