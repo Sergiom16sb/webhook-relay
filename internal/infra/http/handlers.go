@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -17,14 +18,23 @@ import (
 // Handlers are THIN: decode request, call use case, encode response.
 // All business logic lives in the use case or domain.
 type EventHandlers struct {
-	receiveEvent *application.ReceiveEventUseCase
-	verifier     application.SignatureVerifier // nil disables signature check
+	receiveEvent   *application.ReceiveEventUseCase
+	enqueueDeliver *application.EnqueueDeliveriesUseCase
+	verifier       application.SignatureVerifier // nil disables signature check
 }
 
-// NewEventHandlers constructs the handler with the injected use case.
+// NewEventHandlers constructs the handler with the injected use cases.
 // Pass verifier=nil to disable signature verification (dev/testing only).
-func NewEventHandlers(receive *application.ReceiveEventUseCase, verifier application.SignatureVerifier) *EventHandlers {
-	return &EventHandlers{receiveEvent: receive, verifier: verifier}
+func NewEventHandlers(
+	receive *application.ReceiveEventUseCase,
+	enqueueDeliver *application.EnqueueDeliveriesUseCase,
+	verifier application.SignatureVerifier,
+) *EventHandlers {
+	return &EventHandlers{
+		receiveEvent:   receive,
+		enqueueDeliver: enqueueDeliver,
+		verifier:       verifier,
+	}
 }
 
 // postEventRequest is the wire format for POST /events.
@@ -99,6 +109,13 @@ func (h *EventHandlers) PostEvent(w http.ResponseWriter, r *http.Request) {
 		status, msg := mapError(err)
 		writeJSONError(w, status, msg)
 		return
+	}
+
+	// Enqueue delivery jobs (non-blocking — runs in worker pool).
+	// Failures here are logged but don't affect the HTTP response
+	// (the event is already saved and durable).
+	if _, err := h.enqueueDeliver.Enqueue(r.Context(), e.ID); err != nil {
+		fmt.Printf("admin: enqueue failed for %s: %v\n", e.ID, err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

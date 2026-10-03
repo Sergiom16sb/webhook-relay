@@ -15,17 +15,35 @@ import (
 
 const testSecret = "test-secret-key-do-not-use-in-prod"
 
+// fakeSubmitter records submitted jobs but runs them inline (for tests
+// where we don't need real worker pool semantics).
+type fakeSubmitter struct{}
+
+func (f *fakeSubmitter) Submit(job application.Job) { job(context.Background()) }
+
+// noopExecutor is a DeliveryExecutor that does nothing — useful for tests
+// where we don't care about delivery (we just want to enqueue).
+type noopExecutor struct{}
+
+func (noopExecutor) Deliver(_ context.Context, _, _ string) error { return nil }
+
 // newTestServer wires real adapters (no mocks for handler tests).
 // The handler is the integration point — wiring matters.
 func newTestServer(t *testing.T) (*httptest.Server, *memory.MemoryEventStore, *webhook.HMACVerifier) {
 	t.Helper()
 	store := memory.NewMemoryEventStore()
+	subStore := memory.NewMemorySubscriptionStore()
+	attempts := memory.NewMemoryDeliveryAttemptStore()
 	uc := application.NewReceiveEventUseCase(store)
 	verifier, err := webhook.NewHMACVerifier(testSecret)
 	if err != nil {
 		t.Fatalf("new verifier: %v", err)
 	}
-	h := infrahttp.NewEventHandlers(uc, verifier)
+	// For tests, use a no-op executor + a fake submitter so enqueue doesn't
+	// touch the worker pool or block.
+	submitter := &fakeSubmitter{}
+	enqueue := application.NewEnqueueDeliveriesUseCase(store, subStore, attempts, submitter, noopExecutor{})
+	h := infrahttp.NewEventHandlers(uc, enqueue, verifier)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /events", h.PostEvent)
 	return httptest.NewServer(mux), store, verifier
@@ -37,7 +55,12 @@ func newUnverifiedTestServer(t *testing.T) (*httptest.Server, *memory.MemoryEven
 	t.Helper()
 	store := memory.NewMemoryEventStore()
 	uc := application.NewReceiveEventUseCase(store)
-	h := infrahttp.NewEventHandlers(uc, nil)
+	submitter := &fakeSubmitter{}
+	enqueue := application.NewEnqueueDeliveriesUseCase(
+		store, memory.NewMemorySubscriptionStore(), memory.NewMemoryDeliveryAttemptStore(),
+		submitter, noopExecutor{},
+	)
+	h := infrahttp.NewEventHandlers(uc, enqueue, nil)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /events", h.PostEvent)
 	return httptest.NewServer(mux), store

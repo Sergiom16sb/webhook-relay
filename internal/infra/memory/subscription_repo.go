@@ -98,33 +98,32 @@ func (s *MemorySubscriptionStore) Count(_ context.Context) (int, error) {
 // --- MemoryDeliveryAttemptStore ---
 
 // MemoryDeliveryAttemptStore implements DeliveryAttemptStore in-memory.
+// Single-row state machine: one DeliveryAttempt per (event, subscription).
+// Save is an upsert keyed on (event_id, subscription_id).
 type MemoryDeliveryAttemptStore struct {
 	mu sync.RWMutex
-	// attempts[event_id][subscription_id][attempt_num] = attempt
-	attempts map[string]map[string]map[int]*domain.DeliveryAttempt
+	// attempts[event_id][subscription_id] = attempt (one row per pair)
+	attempts map[string]map[string]*domain.DeliveryAttempt
 }
 
 func NewMemoryDeliveryAttemptStore() *MemoryDeliveryAttemptStore {
 	return &MemoryDeliveryAttemptStore{
-		attempts: make(map[string]map[string]map[int]*domain.DeliveryAttempt),
+		attempts: make(map[string]map[string]*domain.DeliveryAttempt),
 	}
 }
 
+// Save upserts the attempt row for (event_id, subscription_id). Replaces
+// any existing row (state transition: pending → success/failed/retrying).
 func (s *MemoryDeliveryAttemptStore) Save(_ context.Context, a *domain.DeliveryAttempt) (*domain.DeliveryAttempt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	bySub, ok := s.attempts[a.EventID]
 	if !ok {
-		bySub = make(map[string]map[int]*domain.DeliveryAttempt)
+		bySub = make(map[string]*domain.DeliveryAttempt)
 		s.attempts[a.EventID] = bySub
 	}
-	byAttempt, ok := bySub[a.SubscriptionID]
-	if !ok {
-		byAttempt = make(map[int]*domain.DeliveryAttempt)
-		bySub[a.SubscriptionID] = byAttempt
-	}
-	byAttempt[a.AttemptNum] = a
+	bySub[a.SubscriptionID] = a
 	return a, nil
 }
 
@@ -132,12 +131,8 @@ func (s *MemoryDeliveryAttemptStore) ListByEventID(_ context.Context, eventID st
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var out []*domain.DeliveryAttempt
-	for _, bySub := range s.attempts[eventID] {
-		for _, byAttempt := range bySub {
-			out = append(out, byAttempt)
-		}
+	for _, a := range s.attempts[eventID] {
+		out = append(out, a)
 	}
-	// Sort by AttemptNum (since we used nested maps, order is non-deterministic).
-	// For v1 tests, order doesn't matter. Could add a sort if needed.
 	return out, nil
 }
