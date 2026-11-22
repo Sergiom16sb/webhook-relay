@@ -1,14 +1,14 @@
 # webhook-relay
 
-Self-hosted webhook receiver with HMAC verification, idempotency, and retry-with-backoff. Production-ready v1.
+Self-hosted webhook receiver and relay with HMAC verification, idempotent storage, retry-with-backoff delivery, and an admin UI.
 
 ## What it does
 
-- Receives webhooks (POST `/events`) with HMAC-SHA256 signature verification
+- Receives webhooks (POST `/events`) with HMAC-SHA256 signature verification over the exact raw body
 - Stores events idempotently by `(source_id, payload_hash)` — duplicate POSTs return the same event ID
-- Delivers events to subscriber URLs (configured via env) with exponential backoff + jitter, capped at `MaxDelay`
-- On permanent failure (4xx other than 408/429): routes to DLQ after max attempts
-- Exposes an admin UI at `/admin*` (htmx + DaisyUI + templ) for inspection + manual retry
+- Delivers each event to every active subscription for its `source_id` through a bounded worker pool, retrying transient failures with exponential backoff + jitter (7 attempts by default, 60s cap)
+- Classifies delivery failures: network/408/429/5xx are retried, other 4xx fail immediately; the attempt row is recorded as `failed` and the event can be retried from the admin UI
+- Exposes an admin UI at `/admin*` (templ + htmx + daisyUI) for dashboards, event inspection, manual retry, subscription CRUD, and HMAC signature generation
 
 ## Quick start
 
@@ -55,6 +55,9 @@ If port 5432 on your host is already in use (e.g. another postgres container), t
 | POST | `/admin/events/{id}/retry` | Manual retry (resets status to pending) |
 | GET | `/admin/hmac` | HMAC signature generator (dev tool) |
 | POST | `/admin/hmac` | Compute signature for given payload |
+| GET | `/admin/subscriptions` | List subscriptions |
+| POST | `/admin/subscriptions` | Create subscription (`source_id`, `target_url`, `secret`) |
+| POST | `/admin/subscriptions/{id}/delete` | Soft-delete subscription (`status = deleted`) |
 
 ### Event payload format
 
@@ -87,22 +90,22 @@ internal/
     admin/                       # htmx + DaisyUI admin panel (templ)
     logger/                      # context-aware slog propagation
 internal/integration/            # E2E tests with -tags=integration
-tests/integration/               # placeholder
 ```
 
-Dependency rule verified with `./scripts/checkpoint.sh --full` (5 gates including `go list -deps` checks).
+The composition root is the only place that knows concrete types; use cases depend on the ports they declare in `internal/application/ports.go`, and adapters bind structurally (no shared interface package).
 
 ## Tests
 
 ```bash
-# Unit tests (fast, ~1s)
+# Unit + adapter tests. The Postgres adapter tests spin up real Postgres
+# via testcontainers, so Docker must be running (~40s total).
 go test ./...
 
-# E2E tests with real Postgres via testcontainers (~25s)
+# End-to-end tests with real Postgres via testcontainers (~40s)
 go test -tags=integration ./internal/integration/...
 
-# All gates (format, vet, unit tests, dependency rule checks)
-./scripts/checkpoint.sh --full
+# Format + vet
+gofmt -l . && go vet ./... && go vet -tags=integration ./internal/integration/...
 ```
 
 E2E coverage:
@@ -111,7 +114,7 @@ E2E coverage:
 - Idempotency (same payload 2x → 1 event)
 - Delivery happy path
 - Delivery retry then success
-- Delivery DLQ after max retries
+- Delivery exhausts max attempts → `ErrMaxAttemptsExceeded`
 - Full pipeline (POST → receive → persist → deliver)
 
 ## Configuration
@@ -120,13 +123,13 @@ E2E coverage:
 |---------|---------|-------------|
 | `WEBHOOK_SECRET` | (empty) | HMAC secret. Empty = signature verification disabled. |
 | `DATABASE_URL` | (empty) | Postgres connection. Empty = in-memory store. |
-| `PORT` | `:8080` | Listen address (set by docker-compose to internal 8080) |
+| `PORT` | `:8080` | Listen port. Accepts `8080` or `:8080`; the Docker HEALTHCHECK follows it. |
 
 ## Roadmap
 
-- **v1 (this)**: receive, verify, persist, deliver with retry, admin UI, Docker compose, E2E tests
-- **v2**: real-time dashboard (SSE), subscriptions CRUD, source management, DaisyUI v5 + Tailwind 4 upgrade
+- **v1**: receive, verify, persist, deliver with retry, admin UI, Docker compose, E2E tests
+- **v2 (in progress)**: subscriptions CRUD, delivery-attempt tracking in the admin UI — done; SSE live dashboard, source management, daisyUI v5 + Tailwind 4 upgrade — pending
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
