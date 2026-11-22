@@ -9,8 +9,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/sgtour/webhook-relay/internal/infra/memory"
-	pgadapter "github.com/sgtour/webhook-relay/internal/infra/postgres"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/memory"
+	pgadapter "github.com/Sergiom16sb/webhook-relay/internal/infra/postgres"
 )
 
 // withSharedDB swaps sharedDB for the duration of the test. Restores on
@@ -20,6 +20,27 @@ func withSharedDB(t *testing.T, db *sqlx.DB) {
 	orig := sharedDB
 	sharedDB = db
 	t.Cleanup(func() { sharedDB = orig })
+}
+
+func TestListenAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		port string
+		want string
+	}{
+		{name: "default when unset", port: "", want: ":8080"},
+		{name: "bare port gets colon", port: "9090", want: ":9090"},
+		{name: "already prefixed", port: ":9090", want: ":9090"},
+		{name: "whitespace trimmed", port: " 8081 ", want: ":8081"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PORT", tc.port)
+			if got := listenAddr(); got != tc.want {
+				t.Errorf("listenAddr() = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestBuildAttemptStore_MemoryWhenSharedDBNil(t *testing.T) {

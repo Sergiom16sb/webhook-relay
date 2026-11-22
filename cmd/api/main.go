@@ -13,19 +13,20 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver registration
 	"github.com/jmoiron/sqlx"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/infra/admin"
-	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
-	"github.com/sgtour/webhook-relay/internal/infra/memory"
-	pgadapter "github.com/sgtour/webhook-relay/internal/infra/postgres"
-	"github.com/sgtour/webhook-relay/internal/infra/webhook"
-	"github.com/sgtour/webhook-relay/internal/infra/worker"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/admin"
+	infrahttp "github.com/Sergiom16sb/webhook-relay/internal/infra/http"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/memory"
+	pgadapter "github.com/Sergiom16sb/webhook-relay/internal/infra/postgres"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/webhook"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/worker"
 )
 
 func main() {
@@ -33,8 +34,9 @@ func main() {
 	// Used by Docker HEALTHCHECK (distroless image has no curl/wget).
 	healthcheckOnly := flag.Bool("healthcheck-only", false, "exit 0 if /healthz responds 200, 1 otherwise (Docker HEALTHCHECK)")
 	flag.Parse()
+	addr := listenAddr()
 	if *healthcheckOnly {
-		resp, err := http.Get("http://localhost:8080/healthz")
+		resp, err := http.Get("http://localhost" + addr + "/healthz")
 		if err != nil || resp.StatusCode != http.StatusOK {
 			os.Exit(1)
 		}
@@ -146,7 +148,7 @@ func main() {
 	)
 
 	srv := &http.Server{
-		Addr:              ":8080",
+		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second, // prevent slowloris
 	}
@@ -180,6 +182,20 @@ func main() {
 	// exit on rootCtx.Done() (cancelled) or jobsCh close.
 	pool.Close()
 	slog.Info("worker pool drained")
+}
+
+// listenAddr resolves the listen address from PORT. Accepts "8080" or
+// ":8080"; defaults to ":8080". The Docker HEALTHCHECK uses the same
+// value, so healthchecks follow a custom port automatically.
+func listenAddr() string {
+	p := strings.TrimSpace(os.Getenv("PORT"))
+	if p == "" {
+		return ":8080"
+	}
+	if strings.HasPrefix(p, ":") {
+		return p
+	}
+	return ":" + p
 }
 
 // closableStore wraps an EventStore with a Close method for cleanup.
