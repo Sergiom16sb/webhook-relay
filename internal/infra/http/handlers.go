@@ -4,30 +4,39 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
 )
+
+// DeliveryEnqueuer schedules delivery jobs for a newly received event.
+// *application.EnqueueDeliveriesUseCase satisfies it; the port keeps the
+// handler testable without a worker pool.
+type DeliveryEnqueuer interface {
+	Enqueue(ctx context.Context, eventID string) (int, error)
+}
 
 // EventHandlers exposes HTTP endpoints for events.
 // Handlers are THIN: decode request, call use case, encode response.
 // All business logic lives in the use case or domain.
 type EventHandlers struct {
 	receiveEvent   *application.ReceiveEventUseCase
-	enqueueDeliver *application.EnqueueDeliveriesUseCase
+	enqueueDeliver DeliveryEnqueuer              // nil disables fan-out
 	verifier       application.SignatureVerifier // nil disables signature check
 }
 
 // NewEventHandlers constructs the handler with the injected use cases.
 // Pass verifier=nil to disable signature verification (dev/testing only).
+// Pass enqueueDeliver=nil to receive events without fanning them out.
 func NewEventHandlers(
 	receive *application.ReceiveEventUseCase,
-	enqueueDeliver *application.EnqueueDeliveriesUseCase,
+	enqueueDeliver DeliveryEnqueuer,
 	verifier application.SignatureVerifier,
 ) *EventHandlers {
 	return &EventHandlers{
@@ -114,8 +123,10 @@ func (h *EventHandlers) PostEvent(w http.ResponseWriter, r *http.Request) {
 	// Enqueue delivery jobs (non-blocking — runs in worker pool).
 	// Failures here are logged but don't affect the HTTP response
 	// (the event is already saved and durable).
-	if _, err := h.enqueueDeliver.Enqueue(r.Context(), e.ID); err != nil {
-		fmt.Printf("admin: enqueue failed for %s: %v\n", e.ID, err)
+	if h.enqueueDeliver != nil {
+		if _, err := h.enqueueDeliver.Enqueue(r.Context(), e.ID); err != nil {
+			fmt.Printf("admin: enqueue failed for %s: %v\n", e.ID, err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

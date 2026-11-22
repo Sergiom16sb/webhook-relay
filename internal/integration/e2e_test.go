@@ -27,12 +27,12 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/domain"
-	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
-	pgadapter "github.com/sgtour/webhook-relay/internal/infra/postgres"
-	"github.com/sgtour/webhook-relay/internal/infra/webhook"
-	"github.com/sgtour/webhook-relay/internal/infra/worker"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
+	infrahttp "github.com/Sergiom16sb/webhook-relay/internal/infra/http"
+	pgadapter "github.com/Sergiom16sb/webhook-relay/internal/infra/postgres"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/webhook"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/worker"
 )
 
 // --- Test helpers ---
@@ -108,7 +108,9 @@ func TestE2E_HappyPath_PostAndPersist(t *testing.T) {
 	secret := "e2e-test-secret"
 	verifier, _ := webhook.NewHMACVerifier(secret)
 	uc := application.NewReceiveEventUseCase(store)
-	h := infrahttp.NewEventHandlers(uc, verifier)
+	// nil enqueuer: these tests assert persistence/verification only; the
+	// delivery path is covered by the delivery tests below.
+	h := infrahttp.NewEventHandlers(uc, nil, verifier)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /events", h.PostEvent)
@@ -150,7 +152,9 @@ func TestE2E_InvalidSignature_Rejected(t *testing.T) {
 
 	verifier, _ := webhook.NewHMACVerifier("right-secret")
 	uc := application.NewReceiveEventUseCase(store)
-	h := infrahttp.NewEventHandlers(uc, verifier)
+	// nil enqueuer: these tests assert persistence/verification only; the
+	// delivery path is covered by the delivery tests below.
+	h := infrahttp.NewEventHandlers(uc, nil, verifier)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /events", h.PostEvent)
@@ -186,7 +190,9 @@ func TestE2E_Idempotency_SamePayloadOnce(t *testing.T) {
 	secret := "e2e-test-secret"
 	verifier, _ := webhook.NewHMACVerifier(secret)
 	uc := application.NewReceiveEventUseCase(store)
-	h := infrahttp.NewEventHandlers(uc, verifier)
+	// nil enqueuer: these tests assert persistence/verification only; the
+	// delivery path is covered by the delivery tests below.
+	h := infrahttp.NewEventHandlers(uc, nil, verifier)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /events", h.PostEvent)
@@ -386,7 +392,7 @@ func TestE2E_FullFlow_PostReceivePersistDeliver(t *testing.T) {
 	defer target.Close()
 
 	receiveUC := application.NewReceiveEventUseCase(store)
-	h := infrahttp.NewEventHandlers(receiveUC, verifier)
+	h := infrahttp.NewEventHandlers(receiveUC, nil, verifier)
 	deliverUC := application.NewDeliverEventUseCase(infrahttp.NewPoster(time.Second),
 		application.RetryPolicy{MaxAttempts: 3, BaseDelay: 10 * time.Millisecond, MaxDelay: time.Second})
 
