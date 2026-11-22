@@ -7,7 +7,7 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
 )
 
 // DeliverySentinels — classify delivery failures.

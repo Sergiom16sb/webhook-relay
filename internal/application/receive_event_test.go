@@ -6,9 +6,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/domain"
-	"github.com/sgtour/webhook-relay/internal/infra/memory"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/memory"
 )
 
 // fakeStore is a hand-rolled test fake. Demonstrates why consumer-side

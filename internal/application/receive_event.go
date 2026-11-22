@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
 )
 
 // ReceiveEventUseCase handles incoming webhook events.

@@ -1,4 +1,4 @@
-module github.com/sgtour/webhook-relay
+module github.com/Sergiom16sb/webhook-relay
 
 go 1.27.1
 

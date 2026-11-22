@@ -16,8 +16,8 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
 )
 
 // Handlers wires the admin routes to templ components.

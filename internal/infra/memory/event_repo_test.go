@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/domain"
-	"github.com/sgtour/webhook-relay/internal/infra/memory"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/memory"
 )
 
 // validEvent returns an Event that passes Validate.

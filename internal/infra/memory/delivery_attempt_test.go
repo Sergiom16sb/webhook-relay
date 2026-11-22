@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
 )
 
 func TestMemoryDeliveryAttemptStore_UpsertReplaces(t *testing.T) {

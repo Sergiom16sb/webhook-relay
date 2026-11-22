@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
+	infrahttp "github.com/Sergiom16sb/webhook-relay/internal/infra/http"
 )
 
 func TestRequestID_GeneratesUniqueIDs(t *testing.T) {

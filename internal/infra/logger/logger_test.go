@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/sgtour/webhook-relay/internal/infra/logger"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/logger"
 )
 
 // captureLogger returns a logger that writes JSON to buf, plus a helper

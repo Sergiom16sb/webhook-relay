@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
 )
 
 // --- Shared prop types ---

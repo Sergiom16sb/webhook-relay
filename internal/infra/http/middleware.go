@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/infra/logger"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/logger"
 )
 
 // Middleware is the standard http.Handler wrapper: takes a handler, returns

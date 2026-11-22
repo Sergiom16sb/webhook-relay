@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/domain"
-	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
+	infrahttp "github.com/Sergiom16sb/webhook-relay/internal/infra/http"
 )
 
 // fakePoster records call count and returns scripted responses.

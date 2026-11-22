@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/domain"
-	"github.com/sgtour/webhook-relay/internal/infra/memory"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/memory"
 )
 
 func ptrTime(t time.Time) *time.Time { return &t }

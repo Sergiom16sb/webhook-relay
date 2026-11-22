@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/infra/webhook"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/webhook"
 )
 
 func newVerifier(t *testing.T) *webhook.HMACVerifier {

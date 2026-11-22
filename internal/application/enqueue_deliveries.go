@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
 )
 
 // Job is the function signature of a unit of work the worker pool runs.

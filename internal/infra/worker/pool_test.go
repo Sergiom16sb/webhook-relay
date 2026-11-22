@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sgtour/webhook-relay/internal/infra/worker"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/worker"
 )
 
 func TestPool_ProcessesAllJobs(t *testing.T) {

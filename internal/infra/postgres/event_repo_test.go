@@ -16,9 +16,9 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	"github.com/sgtour/webhook-relay/internal/domain"
-	"github.com/sgtour/webhook-relay/internal/infra/postgres"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/domain"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/postgres"
 )
 
 // setup spins up a real Postgres via testcontainers, runs migrations,

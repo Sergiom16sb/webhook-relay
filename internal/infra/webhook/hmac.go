@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/sgtour/webhook-relay/internal/application"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
 )
 
 // Compile-time check: HMACVerifier satisfies application.SignatureVerifier.

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sgtour/webhook-relay/internal/application"
-	infrahttp "github.com/sgtour/webhook-relay/internal/infra/http"
-	"github.com/sgtour/webhook-relay/internal/infra/memory"
-	"github.com/sgtour/webhook-relay/internal/infra/webhook"
+	"github.com/Sergiom16sb/webhook-relay/internal/application"
+	infrahttp "github.com/Sergiom16sb/webhook-relay/internal/infra/http"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/memory"
+	"github.com/Sergiom16sb/webhook-relay/internal/infra/webhook"
 )
 
 const testSecret = "test-secret-key-do-not-use-in-prod"
